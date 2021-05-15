@@ -369,6 +369,16 @@ impl Http {
         .await
     }
 
+    /// Creates a stage instance.
+    pub async fn create_stage_instance(&self, map: &Value) -> Result<StageInstance> {
+        self.fire(Request {
+            body: Some(map.to_string().as_bytes()),
+            headers: None,
+            route: RouteInfo::CreateStageInstance,
+        })
+        .await
+    }
+
     /// Creates an emoji in the given [`Guild`] with the given data.
     ///
     /// View the source code for [`Guild::create_emoji`] method to see what
@@ -740,6 +750,18 @@ impl Http {
         .await
     }
 
+    /// Deletes a stage instance..
+    pub async fn delete_stage_instance(&self, channel_id: u64) -> Result<()> {
+        self.wind(204, Request {
+            body: None,
+            headers: None,
+            route: RouteInfo::DeleteStageInstance {
+                channel_id,
+            },
+        })
+        .await
+    }
+
     /// Deletes an emoji from a server.
     pub async fn delete_emoji(&self, guild_id: u64, emoji_id: u64) -> Result<()> {
         self.wind(204, Request {
@@ -1061,6 +1083,18 @@ impl Http {
             body: Some(&body),
             headers: None,
             route: RouteInfo::EditChannel {
+                channel_id,
+            },
+        })
+        .await
+    }
+
+    /// Edits a stage instance.
+    pub async fn edit_stage_instance(&self, channel_id: u64, map: &Value) -> Result<StageInstance> {
+        self.fire(Request {
+            body: Some(map.to_string().as_bytes()),
+            headers: None,
+            route: RouteInfo::EditStageInstance {
                 channel_id,
             },
         })
@@ -1983,6 +2017,18 @@ impl Http {
             headers: None,
             route: RouteInfo::GetChannels {
                 guild_id,
+            },
+        })
+        .await
+    }
+
+    /// Gets a stage instance.
+    pub async fn get_stage_instance(&self, channel_id: u64) -> Result<StageInstance> {
+        self.fire(Request {
+            body: None,
+            headers: None,
+            route: RouteInfo::GetStageInstance {
+                channel_id,
             },
         })
         .await
