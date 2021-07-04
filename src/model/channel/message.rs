@@ -31,7 +31,7 @@ use crate::collector::{CollectReaction, ReactionCollectorBuilder};
 use crate::http::{CacheHttp, Http};
 use crate::json::Value;
 #[cfg(feature = "unstable_discord_api")]
-use crate::model::interactions::MessageInteraction;
+use crate::model::interactions::{message_component::ActionRow, MessageInteraction};
 use crate::model::prelude::*;
 #[cfg(feature = "model")]
 use crate::model::utils::U64Visitor;
@@ -134,7 +134,7 @@ pub struct Message {
     #[cfg(feature = "unstable_discord_api")]
     #[cfg_attr(docsrs, doc(cfg(feature = "unstable_discord_api")))]
     #[serde(default)]
-    pub components: Vec<Component>,
+    pub components: Vec<ActionRow>,
 }
 
 #[cfg(feature = "model")]

@@ -3,12 +3,12 @@ use std::collections::HashMap;
 use crate::internal::prelude::*;
 use crate::json::{from_number, Value};
 use crate::model::channel::ReactionType;
-use crate::model::prelude::ButtonStyle;
+use crate::model::interactions::message_component::ButtonStyle;
 use crate::utils;
 
 /// A builder for creating several [`ActionRow`]s.
 ///
-/// [`ActionRow`]: crate::model::interactions::ActionRow
+/// [`ActionRow`]: crate::model::interactions::message_component::ActionRow
 #[derive(Clone, Debug, Default)]
 pub struct CreateComponents(pub Vec<Value>);
 
@@ -47,7 +47,7 @@ impl CreateComponents {
 
 /// A builder for creating an [`ActionRow`].
 ///
-/// [`ActionRow`]: crate::model::interactions::ActionRow
+/// [`ActionRow`]: crate::model::interactions::message_component::ActionRow
 #[derive(Clone, Debug, Default)]
 pub struct CreateActionRow(pub HashMap<&'static str, Value>);
 
@@ -109,7 +109,7 @@ impl CreateActionRow {
 
 /// A builder for creating a [`Button`].
 ///
-/// [`Button`]: crate::model::interactions::Button
+/// [`Button`]: crate::model::interactions::message_component::Button
 #[derive(Clone, Debug, Default)]
 pub struct CreateButton(pub HashMap<&'static str, Value>);
 
@@ -179,7 +179,7 @@ impl CreateButton {
 
 /// A builder for creating a [`SelectMenu`].
 ///
-/// [`SelectMenu`]: crate::model::interactions::SelectMenu
+/// [`SelectMenu`]: crate::model::interactions::message_component::SelectMenu
 #[derive(Clone, Debug, Default)]
 pub struct CreateSelectMenu(pub HashMap<&'static str, Value>);
 
@@ -229,7 +229,7 @@ impl CreateSelectMenu {
 
 /// A builder for creating several [`SelectMenuOption`].
 ///
-/// [`SelectMenuOption`]: crate::model::interactions::SelectMenuOption
+/// [`SelectMenuOption`]: crate::model::interactions::message_component::SelectMenuOption
 #[derive(Clone, Debug, Default)]
 pub struct CreateSelectMenuOptions(pub Vec<Value>);
 
@@ -273,7 +273,7 @@ impl CreateSelectMenuOptions {
 
 /// A builder for creating a [`SelectMenuOption`].
 ///
-/// [`SelectMenuOption`]: crate::model::interactions::SelectMenuOption
+/// [`SelectMenuOption`]: crate::model::interactions::message_component::SelectMenuOption
 #[derive(Clone, Debug, Default)]
 pub struct CreateSelectMenuOption(pub HashMap<&'static str, Value>);
 
