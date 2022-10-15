@@ -1,16 +1,12 @@
 use std::sync::Arc;
 
-#[cfg(all(feature = "tokio_compat", not(feature = "tokio")))]
-use tokio::time::delay_for as sleep;
-#[cfg(feature = "tokio")]
-use tokio::time::sleep;
-use tokio::{
-    sync::oneshot::{self, error::TryRecvError, Sender},
-    time::Duration,
-};
+use tokio::sync::oneshot::error::TryRecvError;
+use tokio::sync::oneshot::{self, Sender};
+use tokio::time::{sleep, Duration};
 
+use crate::http::Http;
+use crate::internal::prelude::*;
 use crate::internal::tokio::spawn_named;
-use crate::{error::Result, http::Http};
 
 /// A struct to start typing in a [`Channel`] for an indefinite period of time.
 ///
@@ -35,7 +31,7 @@ use crate::{error::Result, http::Http};
 /// #
 /// # fn long_process() {}
 /// # fn main() -> Result<()> {
-/// # let http = Http::default();
+/// # let http = Http::new("token");
 /// // Initiate typing (assuming `http` is bound)
 /// let typing = Typing::start(Arc::new(http), 7)?;
 ///
@@ -65,7 +61,6 @@ impl Typing {
     /// Returns an  [`Error::Http`] if there is an error.
     ///
     /// [`Channel`]: crate::model::channel::Channel
-    /// [`Error::Http`]: crate::error::Error::Http
     pub fn start(http: Arc<Http>, channel_id: u64) -> Result<Self> {
         let (sx, mut rx) = oneshot::channel();
 
@@ -95,6 +90,7 @@ impl Typing {
     /// Typing may persist for a few seconds on some clients after this is called.
     ///
     /// [`Channel`]: crate::model::channel::Channel
+    #[allow(clippy::must_use_candidate)]
     pub fn stop(self) -> Option<()> {
         self.0.send(()).ok()
     }

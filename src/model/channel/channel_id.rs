@@ -1,28 +1,23 @@
 #[cfg(feature = "model")]
-use std::fmt::Write as FmtWrite;
+use std::fmt::Write as _;
 #[cfg(feature = "model")]
 use std::sync::Arc;
 
 #[cfg(feature = "model")]
-use bytes::buf::Buf;
 use futures::stream::Stream;
-#[cfg(feature = "model")]
-use reqwest::Url;
-#[cfg(feature = "model")]
-use serde_json::json;
-#[cfg(feature = "model")]
-use tokio::{fs::File, io::AsyncReadExt};
 
 #[cfg(feature = "model")]
 use crate::builder::{
     CreateInvite,
     CreateMessage,
+    CreateStageInstance,
     CreateThread,
     EditChannel,
     EditMessage,
+    EditStageInstance,
+    EditThread,
     GetMessages,
 };
-use crate::builder::{CreateStageInstance, EditStageInstance};
 #[cfg(all(feature = "cache", feature = "model"))]
 use crate::cache::Cache;
 #[cfg(feature = "collector")]
@@ -35,12 +30,14 @@ use crate::collector::{
     ReactionCollectorBuilder,
 };
 #[cfg(feature = "model")]
-use crate::http::AttachmentType;
-#[cfg(feature = "model")]
 use crate::http::{CacheHttp, Http, Typing};
+#[cfg(feature = "model")]
+use crate::json::{self, json};
+#[cfg(feature = "model")]
+use crate::model::channel::AttachmentType;
 use crate::model::prelude::*;
-#[cfg(all(feature = "model", feature = "utils"))]
-use crate::utils;
+#[cfg(feature = "model")]
+use crate::utils::encode_image;
 
 #[cfg(feature = "model")]
 impl ChannelId {
@@ -61,7 +58,7 @@ impl ChannelId {
     /// use serenity::model::id::ChannelId;
     ///
     /// # async fn run() {
-    /// # let http = serenity::http::Http::default();
+    /// # let http = serenity::http::Http::new("token");
     /// let _successful = ChannelId(7).broadcast_typing(&http).await;
     /// # }
     /// ```
@@ -79,14 +76,13 @@ impl ChannelId {
 
     /// Creates an invite leading to the given channel.
     ///
-    /// **Note**: Requres the [Create Invite] permission.
+    /// **Note**: Requires the [Create Instant Invite] permission.
     ///
     /// # Errors
     ///
     /// Returns [`Error::Http`] if the current user lacks permission.
     ///
-    /// [Create Invite]: Permissions::CREATE_INVITE
-    #[cfg(feature = "utils")]
+    /// [Create Instant Invite]: Permissions::CREATE_INSTANT_INVITE
     pub async fn create_invite<F>(&self, http: impl AsRef<Http>, f: F) -> Result<RichInvite>
     where
         F: FnOnce(&mut CreateInvite) -> &mut CreateInvite,
@@ -94,9 +90,9 @@ impl ChannelId {
         let mut invite = CreateInvite::default();
         f(&mut invite);
 
-        let map = utils::hashmap_to_json_map(invite.0);
+        let map = json::hashmap_to_json_map(invite.0);
 
-        http.as_ref().create_invite(self.0, &map).await
+        http.as_ref().create_invite(self.0, &map, None).await
     }
 
     /// Creates a [permission overwrite][`PermissionOverwrite`] for either a
@@ -321,7 +317,7 @@ impl ChannelId {
     /// # async fn run() {
     /// #     use serenity::http::Http;
     /// #     use serenity::model::id::ChannelId;
-    /// #     let http = Http::default();
+    /// #     let http = Http::new("token");
     /// #     let channel_id = ChannelId(1234);
     /// channel_id.edit(&http, |c| c.name("test").bitrate(64000)).await;
     /// # }
@@ -333,7 +329,6 @@ impl ChannelId {
     /// or if an invalid value is set.
     ///
     /// [Manage Channel]: Permissions::MANAGE_CHANNELS
-    #[cfg(feature = "utils")]
     #[inline]
     pub async fn edit<F>(self, http: impl AsRef<Http>, f: F) -> Result<GuildChannel>
     where
@@ -342,9 +337,9 @@ impl ChannelId {
         let mut channel = EditChannel::default();
         f(&mut channel);
 
-        let map = utils::hashmap_to_json_map(channel.0);
+        let map = json::hashmap_to_json_map(channel.0);
 
-        http.as_ref().edit_channel(self.0, &map).await
+        http.as_ref().edit_channel(self.0, &map, None).await
     }
 
     /// Edits a [`Message`] in the channel given its Id.
@@ -362,58 +357,89 @@ impl ChannelId {
     /// is over the [`the limit`], containing the number of unicode code points
     /// over the limit.
     ///
-    /// [`EditMessage`]: crate::builder::EditMessage
     /// [`the limit`]: crate::builder::EditMessage::content
-    #[cfg(feature = "utils")]
     #[inline]
-    pub async fn edit_message<F>(
+    pub async fn edit_message<'a, F>(
         self,
         http: impl AsRef<Http>,
         message_id: impl Into<MessageId>,
         f: F,
     ) -> Result<Message>
     where
-        F: FnOnce(&mut EditMessage) -> &mut EditMessage,
+        F: for<'b> FnOnce(&'b mut EditMessage<'a>) -> &'b mut EditMessage<'a>,
     {
         let mut msg = EditMessage::default();
         f(&mut msg);
 
-        if let Some(Value::String(ref content)) = msg.0.get("content") {
+        if let Some(Value::String(content)) = msg.0.get("content") {
             if let Some(length_over) = Message::overflow_length(content) {
                 return Err(Error::Model(ModelError::MessageTooLong(length_over)));
             }
         }
 
-        let map = utils::hashmap_to_json_map(msg.0);
+        let map = json::hashmap_to_json_map(msg.0);
 
-        http.as_ref().edit_message(self.0, message_id.into().0, &Value::Object(map)).await
+        http.as_ref()
+            .edit_message_and_attachments(self.0, message_id.into().0, &Value::from(map), msg.1)
+            .await
+    }
+
+    /// Follows the News Channel
+    ///
+    /// Requires [Manage Webhook] permissions on the target channel.
+    ///
+    /// **Note**: Only available on news channels.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Http`] if the current user lacks permission.
+    /// [Manage Webhook]: Permissions::MANAGE_WEBHOOKS
+    pub async fn follow(
+        self,
+        http: impl AsRef<Http>,
+        target_channel_id: impl Into<ChannelId>,
+    ) -> Result<FollowedChannel> {
+        http.as_ref().follow_news_channel(self.0, target_channel_id.into().0).await
     }
 
     /// Attempts to find a [`Channel`] by its Id in the cache.
     #[cfg(feature = "cache")]
     #[inline]
-    pub async fn to_channel_cached(self, cache: impl AsRef<Cache>) -> Option<Channel> {
-        cache.as_ref().channel(self).await
+    pub fn to_channel_cached(self, cache: impl AsRef<Cache>) -> Option<Channel> {
+        cache.as_ref().channel(self)
     }
 
     /// First attempts to find a [`Channel`] by its Id in the cache,
     /// upon failure requests it via the REST API.
     ///
-    /// **Note**: If the `cache`-feature is enabled permissions will be checked and upon
-    /// owning the required permissions the HTTP-request will be issued.
+    /// **Note**: If the `cache`-feature is enabled permissions will be checked and upon owning the
+    /// required permissions the HTTP-request will be issued. Additionally, you might want to
+    /// enable the `temp_cache` feature to cache channel data retrieved by this function for a
+    /// short duration.
     #[allow(clippy::missing_errors_doc)]
     #[inline]
     pub async fn to_channel(self, cache_http: impl CacheHttp) -> Result<Channel> {
         #[cfg(feature = "cache")]
         {
             if let Some(cache) = cache_http.cache() {
-                if let Some(channel) = cache.channel(self).await {
+                if let Some(channel) = cache.channel(self) {
                     return Ok(channel);
                 }
             }
         }
 
-        cache_http.http().get_channel(self.0).await
+        let channel = cache_http.http().get_channel(self.0).await?;
+
+        #[cfg(all(feature = "cache", feature = "temp_cache"))]
+        {
+            if let Some(cache) = cache_http.cache() {
+                if let Channel::Guild(guild_channel) = &channel {
+                    cache.temp_channels.insert(guild_channel.id, guild_channel.clone());
+                }
+            }
+        }
+
+        Ok(channel)
     }
 
     /// Gets all of the channel's invites.
@@ -464,7 +490,6 @@ impl ChannelId {
     /// Returns [`Error::Http`] if the current user does not have
     /// permission to view the channel.
     ///
-    /// [`GetMessages`]: crate::builder::GetMessages
     /// [Read Message History]: Permissions::READ_MESSAGE_HISTORY
     pub async fn messages<F>(self, http: impl AsRef<Http>, builder: F) -> Result<Vec<Message>>
     where
@@ -510,18 +535,14 @@ impl ChannelId {
     /// #
     /// # async fn run() {
     /// # let channel_id = ChannelId::default();
-    /// # let ctx = Http::default();
-    /// use serenity::model::channel::MessagesIter;
+    /// # let ctx = Http::new("token");
     /// use serenity::futures::StreamExt;
+    /// use serenity::model::channel::MessagesIter;
     ///
     /// let mut messages = channel_id.messages_iter(&ctx).boxed();
     /// while let Some(message_result) = messages.next().await {
     ///     match message_result {
-    ///         Ok(message) => println!(
-    ///             "{} said \"{}\".",
-    ///             message.author.name,
-    ///             message.content,
-    ///         ),
+    ///         Ok(message) => println!("{} said \"{}\".", message.author.name, message.content,),
     ///         Err(error) => eprintln!("Uh oh! Error: {}", error),
     ///     }
     /// }
@@ -533,8 +554,9 @@ impl ChannelId {
 
     /// Returns the name of whatever channel this id holds.
     #[cfg(feature = "cache")]
+    #[allow(clippy::unused_async)]
     pub async fn name(self, cache: impl AsRef<Cache>) -> Option<String> {
-        let channel = self.to_channel_cached(cache).await?;
+        let channel = self.to_channel_cached(cache)?;
 
         Some(match channel {
             Channel::Guild(channel) => channel.name().to_string(),
@@ -555,14 +577,14 @@ impl ChannelId {
     /// [Manage Messages]: Permissions::MANAGE_MESSAGES
     #[inline]
     pub async fn pin(self, http: impl AsRef<Http>, message_id: impl Into<MessageId>) -> Result<()> {
-        http.as_ref().pin_message(self.0, message_id.into().0).await
+        http.as_ref().pin_message(self.0, message_id.into().0, None).await
     }
 
     /// Crossposts a [`Message`].
     ///
     /// Requires either to be the message author or to have manage [Manage Messages] permissions on this channel.
     ///
-    /// **Note**: Only available on announcements channels.
+    /// **Note**: Only available on news channels.
     ///
     /// # Errors
     ///
@@ -604,6 +626,10 @@ impl ChannelId {
     /// user. This is useful for pagination.
     ///
     /// **Note**: Requires the [Read Message History] permission.
+    ///
+    /// **Note**: If the passed reaction_type is a custom guild emoji, it must contain the name. So,
+    /// [`Emoji`] or [`EmojiIdentifier`] will always work, [`ReactionType`] only if
+    /// [`ReactionType::Custom::name`] is Some, and **[`EmojiId`] will never work**.
     ///
     /// # Errors
     ///
@@ -656,7 +682,9 @@ impl ChannelId {
     ///
     /// The [Attach Files] and [Send Messages] permissions are required.
     ///
-    /// **Note**: Message contents must be under 2000 unicode code points.
+    /// **Note**: Message contents must be under 2000 unicode code points, and embeds must be under
+    /// 6000 unicode code points.
+    ///
     ///
     /// # Examples
     ///
@@ -667,17 +695,14 @@ impl ChannelId {
     /// # use std::sync::Arc;
     /// #
     /// # async fn run() {
-    /// # let http = Arc::new(Http::default());
+    /// # let http = Arc::new(Http::new("token"));
     /// use serenity::model::id::ChannelId;
     ///
     /// let channel_id = ChannelId(7);
     ///
     /// let paths = vec!["/path/to/file.jpg", "path/to/file2.jpg"];
     ///
-    /// let _ = channel_id.send_files(&http, paths, |m| {
-    ///     m.content("a file")
-    /// })
-    /// .await;
+    /// let _ = channel_id.send_files(&http, paths, |m| m.content("a file")).await;
     /// # }
     /// ```
     ///
@@ -688,7 +713,7 @@ impl ChannelId {
     /// # use std::sync::Arc;
     /// #
     /// # async fn run() -> Result<(), Box<dyn std::error::Error>> {
-    /// # let http = Arc::new(Http::default());
+    /// # let http = Arc::new(Http::new("token"));
     /// use serenity::model::id::ChannelId;
     /// use tokio::fs::File;
     ///
@@ -699,10 +724,7 @@ impl ChannelId {
     ///
     /// let files = vec![(&f1, "my_file.jpg"), (&f2, "my_file2.jpg")];
     ///
-    /// let _ = channel_id.send_files(&http, files, |m| {
-    ///     m.content("a file")
-    /// })
-    /// .await;
+    /// let _ = channel_id.send_files(&http, files, |m| m.content("a file")).await;
     /// #    Ok(())
     /// # }
     /// ```
@@ -722,7 +744,6 @@ impl ChannelId {
     /// [Attach Files]: Permissions::ATTACH_FILES
     /// [Send Messages]: Permissions::SEND_MESSAGES
     /// [`File`]: tokio::fs::File
-    #[cfg(feature = "utils")]
     pub async fn send_files<'a, F, T, It>(
         self,
         http: impl AsRef<Http>,
@@ -737,12 +758,11 @@ impl ChannelId {
         let mut create_message = CreateMessage::default();
         let msg = f(&mut create_message);
 
-        let map = utils::hashmap_to_json_map(msg.0.clone());
+        let map = json::hashmap_to_json_map(msg.0.clone());
 
-        Message::check_content_length(&map)?;
-        Message::check_embed_length(&map)?;
+        Message::check_lengths(&map)?;
 
-        http.as_ref().send_files(self.0, files, map).await
+        http.as_ref().send_files(self.0, files, &map).await
     }
 
     /// Sends a message to the channel.
@@ -763,28 +783,28 @@ impl ChannelId {
     /// Returns [`Error::Http`] if the current user lacks permission to
     /// send a message in this channel.
     ///
-    /// [`CreateMessage`]: crate::builder::CreateMessage
     /// [Send Messages]: Permissions::SEND_MESSAGES
-    #[cfg(feature = "utils")]
     pub async fn send_message<'a, F>(self, http: impl AsRef<Http>, f: F) -> Result<Message>
     where
         for<'b> F: FnOnce(&'b mut CreateMessage<'a>) -> &'b mut CreateMessage<'a>,
     {
         let mut create_message = CreateMessage::default();
-        let msg = f(&mut create_message);
+        f(&mut create_message);
+        self._send_message(http.as_ref(), create_message).await
+    }
 
-        let map = utils::hashmap_to_json_map(msg.0.clone());
+    async fn _send_message<'a>(self, http: &Http, msg: CreateMessage<'a>) -> Result<Message> {
+        let map = json::hashmap_to_json_map(msg.0);
 
-        Message::check_content_length(&map)?;
-        Message::check_embed_length(&map)?;
+        Message::check_lengths(&map)?;
 
         let message = if msg.2.is_empty() {
-            http.as_ref().send_message(self.0, &Value::Object(map)).await?
+            http.as_ref().send_message(self.0, &Value::from(map)).await?
         } else {
-            http.as_ref().send_files(self.0, msg.2.clone(), map).await?
+            http.as_ref().send_files(self.0, msg.2, &map).await?
         };
 
-        if let Some(reactions) = msg.1.clone() {
+        if let Some(reactions) = msg.1 {
             for reaction in reactions {
                 self.create_reaction(&http, message.id, reaction).await?;
             }
@@ -814,7 +834,7 @@ impl ChannelId {
     /// #
     /// # fn long_process() {}
     /// # fn main() -> Result<()> {
-    /// # let http = Arc::new(Http::default());
+    /// # let http = Arc::new(Http::new("token"));
     /// // Initiate typing (assuming http is `Arc<Http>`)
     /// let typing = ChannelId(7).start_typing(&http)?;
     ///
@@ -851,7 +871,7 @@ impl ChannelId {
         http: impl AsRef<Http>,
         message_id: impl Into<MessageId>,
     ) -> Result<()> {
-        http.as_ref().unpin_message(self.0, message_id.into().0).await
+        http.as_ref().unpin_message(self.0, message_id.into().0, None).await
     }
 
     /// Retrieves the channel's webhooks.
@@ -878,11 +898,11 @@ impl ChannelId {
         http: impl AsRef<Http>,
         name: impl std::fmt::Display,
     ) -> Result<Webhook> {
-        let map = serde_json::json!({
+        let map = json!({
             "name": name.to_string(),
         });
 
-        http.as_ref().create_webhook(self.0, &map).await
+        http.as_ref().create_webhook(self.0, &map, None).await
     }
 
     /// Creates a webhook with a name and an avatar.
@@ -897,86 +917,43 @@ impl ChannelId {
         name: impl std::fmt::Display,
         avatar: impl Into<AttachmentType<'a>>,
     ) -> Result<Webhook> {
-        let name = name.to_string();
-        let avatar = avatar.into();
-
-        let avatar = match avatar {
-            AttachmentType::Bytes {
-                data,
-                filename: _,
-            } => "data:image/png;base64,".to_string() + &base64::encode(&data.into_owned()),
-            AttachmentType::File {
-                file,
-                filename: _,
-            } => {
-                let mut buf = Vec::new();
-                file.try_clone().await?.read_to_end(&mut buf).await?;
-
-                "data:image/png;base64,".to_string() + &base64::encode(&buf)
-            },
-            AttachmentType::Path(path) => {
-                let mut file = File::open(path).await?;
-                let mut buf = vec![];
-                file.read_to_end(&mut buf).await?;
-
-                "data:image/png;base64,".to_string() + &base64::encode(&buf)
-            },
-            AttachmentType::Image(url) => {
-                let url = Url::parse(url).map_err(|_| Error::Url(url.to_string()))?;
-                let response = http.as_ref().client.get(url).send().await?;
-                let mut bytes = response.bytes().await?;
-                let mut picture: Vec<u8> = vec![0; bytes.len()];
-                bytes.copy_to_slice(&mut picture[..]);
-
-                "data:image/png;base64,".to_string() + &base64::encode(&picture)
-            },
-        };
-
-        let map = serde_json::json!({
-            "name": name,
-            "avatar": avatar
+        let http = http.as_ref();
+        let data = avatar.into().data(&http.client).await?;
+        let map = json!({
+            "name": name.to_string(),
+            "avatar": encode_image(&data),
         });
 
-        http.as_ref().create_webhook(self.0, &map).await
+        http.create_webhook(self.0, &map, None).await
     }
 
     /// Returns a future that will await one message sent in this channel.
     #[cfg(feature = "collector")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "collector")))]
-    pub fn await_reply<'a>(
-        &self,
-        shard_messenger: &'a impl AsRef<ShardMessenger>,
-    ) -> CollectReply<'a> {
+    pub fn await_reply(&self, shard_messenger: impl AsRef<ShardMessenger>) -> CollectReply {
         CollectReply::new(shard_messenger).channel_id(self.0)
     }
 
     /// Returns a stream builder which can be awaited to obtain a stream of messages in this channel.
     #[cfg(feature = "collector")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "collector")))]
-    pub fn await_replies<'a>(
+    pub fn await_replies(
         &self,
-        shard_messenger: &'a impl AsRef<ShardMessenger>,
-    ) -> MessageCollectorBuilder<'a> {
+        shard_messenger: impl AsRef<ShardMessenger>,
+    ) -> MessageCollectorBuilder {
         MessageCollectorBuilder::new(shard_messenger).channel_id(self.0)
     }
 
     /// Await a single reaction in this guild.
     #[cfg(feature = "collector")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "collector")))]
-    pub fn await_reaction<'a>(
-        &self,
-        shard_messenger: &'a impl AsRef<ShardMessenger>,
-    ) -> CollectReaction<'a> {
+    pub fn await_reaction(&self, shard_messenger: impl AsRef<ShardMessenger>) -> CollectReaction {
         CollectReaction::new(shard_messenger).channel_id(self.0)
     }
 
     /// Returns a stream builder which can be awaited to obtain a stream of reactions sent in this channel.
     #[cfg(feature = "collector")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "collector")))]
-    pub fn await_reactions<'a>(
+    pub fn await_reactions(
         &self,
-        shard_messenger: &'a impl AsRef<ShardMessenger>,
-    ) -> ReactionCollectorBuilder<'a> {
+        shard_messenger: impl AsRef<ShardMessenger>,
+    ) -> ReactionCollectorBuilder {
         ReactionCollectorBuilder::new(shard_messenger).channel_id(self.0)
     }
 
@@ -1007,9 +984,9 @@ impl ChannelId {
         let mut instance = CreateStageInstance::default();
         f(&mut instance);
 
-        let map = utils::hashmap_to_json_map(instance.0);
+        let map = json::hashmap_to_json_map(instance.0);
 
-        http.as_ref().create_stage_instance(&Value::Object(map)).await
+        http.as_ref().create_stage_instance(&Value::from(map)).await
     }
 
     /// Edits a stage instance.
@@ -1029,9 +1006,26 @@ impl ChannelId {
         let mut instance = EditStageInstance::default();
         f(&mut instance);
 
-        let map = utils::hashmap_to_json_map(instance.0);
+        let map = json::hashmap_to_json_map(instance.0);
 
-        http.as_ref().edit_stage_instance(self.0, &Value::Object(map)).await
+        http.as_ref().edit_stage_instance(self.0, &Value::from(map)).await
+    }
+
+    /// Edits a thread.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Http`] if the current user lacks permission.
+    pub async fn edit_thread<F>(&self, http: impl AsRef<Http>, f: F) -> Result<GuildChannel>
+    where
+        F: FnOnce(&mut EditThread) -> &mut EditThread,
+    {
+        let mut instance = EditThread::default();
+        f(&mut instance);
+
+        let map = json::hashmap_to_json_map(instance.0);
+
+        http.as_ref().edit_thread(self.0, &map).await
     }
 
     /// Deletes a stage instance.
@@ -1061,7 +1055,7 @@ impl ChannelId {
         let mut instance = CreateThread::default();
         f(&mut instance);
 
-        let map = utils::hashmap_to_json_map(instance.0);
+        let map = json::hashmap_to_json_map(instance.0);
 
         http.as_ref().create_public_thread(self.0, message_id.into().0, &map).await
     }
@@ -1083,7 +1077,7 @@ impl ChannelId {
         instance.kind(ChannelType::PrivateThread);
         f(&mut instance);
 
-        let map = utils::hashmap_to_json_map(instance.0);
+        let map = json::hashmap_to_json_map(instance.0);
 
         http.as_ref().create_private_thread(self.0, &map).await
     }
@@ -1137,18 +1131,6 @@ impl ChannelId {
         http.as_ref().remove_thread_channel_member(self.0, user_id.into()).await
     }
 
-    /// Gets all active threads of a channel.
-    ///
-    /// # Errors
-    ///
-    /// It may return an [`Error::Http`] if the bot doesn't have the
-    /// permission to get it.
-    #[deprecated(note = "Use GuildId::get_active_threads instead")]
-    pub async fn get_active_threads(&self, http: impl AsRef<Http>) -> Result<ThreadsData> {
-        #[allow(deprecated)]
-        http.as_ref().get_channel_active_threads(self.0).await
-    }
-
     /// Gets private archived threads of a channel.
     ///
     /// # Errors
@@ -1195,6 +1177,7 @@ impl ChannelId {
     }
 }
 
+#[cfg(feature = "model")]
 impl From<Channel> for ChannelId {
     /// Gets the Id of a [`Channel`].
     fn from(channel: Channel) -> ChannelId {
@@ -1202,6 +1185,7 @@ impl From<Channel> for ChannelId {
     }
 }
 
+#[cfg(feature = "model")]
 impl<'a> From<&'a Channel> for ChannelId {
     /// Gets the Id of a [`Channel`].
     fn from(channel: &Channel) -> ChannelId {
@@ -1318,18 +1302,14 @@ impl<H: AsRef<Http>> MessagesIter<H> {
     /// #
     /// # async fn run() {
     /// # let channel_id = ChannelId::default();
-    /// # let ctx = Http::default();
-    /// use serenity::model::channel::MessagesIter;
+    /// # let ctx = Http::new("token");
     /// use serenity::futures::StreamExt;
+    /// use serenity::model::channel::MessagesIter;
     ///
     /// let mut messages = MessagesIter::<Http>::stream(&ctx, channel_id).boxed();
     /// while let Some(message_result) = messages.next().await {
     ///     match message_result {
-    ///         Ok(message) => println!(
-    ///             "{} said \"{}\"",
-    ///             message.author.name,
-    ///             message.content,
-    ///         ),
+    ///         Ok(message) => println!("{} said \"{}\"", message.author.name, message.content,),
     ///         Err(error) => eprintln!("Uh oh! Error: {}", error),
     ///     }
     /// }

@@ -1,7 +1,6 @@
-use chrono::{DateTime, Utc};
-use serde_json::Value;
-
+use crate::json::NULL;
 use crate::model::prelude::*;
+use crate::model::Timestamp;
 
 /// A builder for constructing a personal [`Message`] instance.
 /// This can be useful for emitting a manual [`dispatch`] to the framework,
@@ -18,6 +17,7 @@ impl CustomMessage {
     /// with dummy data. Use the methods to replace the individual bits
     /// of this message with valid data.
     #[inline]
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -26,6 +26,7 @@ impl CustomMessage {
     ///
     /// If not used, the default value is `MessageId(0)`.
     #[inline]
+    #[must_use]
     pub fn id(&mut self, id: MessageId) -> &mut Self {
         self.msg.id = id;
 
@@ -79,8 +80,8 @@ impl CustomMessage {
     ///
     /// If not used, the default value is [`None`] (not all messages are edited).
     #[inline]
-    pub fn edited_timestamp(&mut self, timestamp: DateTime<Utc>) -> &mut Self {
-        self.msg.edited_timestamp = Some(timestamp);
+    pub fn edited_timestamp<T: Into<Timestamp>>(&mut self, timestamp: T) -> &mut Self {
+        self.msg.edited_timestamp = Some(timestamp.into());
 
         self
     }
@@ -193,8 +194,8 @@ impl CustomMessage {
     ///
     /// If not used, the default value is the current local time.
     #[inline]
-    pub fn timestamp(&mut self, timestamp: DateTime<Utc>) -> &mut Self {
-        self.msg.timestamp = timestamp;
+    pub fn timestamp<T: Into<Timestamp>>(&mut self, timestamp: T) -> &mut Self {
+        self.msg.timestamp = timestamp.into();
 
         self
     }
@@ -221,6 +222,7 @@ impl CustomMessage {
 
     /// Consume this builder and return the constructed message.
     #[inline]
+    #[must_use]
     pub fn build(self) -> Message {
         self.msg
     }
@@ -247,6 +249,9 @@ fn dummy_message() -> Message {
             discriminator: 0x0000,
             name: String::new(),
             public_flags: None,
+            banner: None,
+            accent_colour: None,
+            member: None,
         },
         channel_id: ChannelId::default(),
         content: String::new(),
@@ -259,21 +264,21 @@ fn dummy_message() -> Message {
         mention_roles: Vec::new(),
         mention_channels: Vec::new(),
         mentions: Vec::new(),
-        nonce: Value::Null,
+        nonce: NULL,
         pinned: false,
         reactions: Vec::new(),
         tts: false,
         webhook_id: None,
-        timestamp: Utc::now(),
+        timestamp: Timestamp::now(),
         activity: None,
         application: None,
         message_reference: None,
         flags: None,
-        stickers: Vec::new(),
+        sticker_items: Vec::new(),
         referenced_message: None,
-        #[cfg(feature = "unstable_discord_api")]
         interaction: None,
-        #[cfg(feature = "unstable_discord_api")]
         components: vec![],
+        application_id: None,
+        thread: None,
     }
 }

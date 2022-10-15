@@ -6,19 +6,20 @@
 //! embeds:
 //!
 //! ```rust,no_run
-//! use serenity::framework::standard::{
-//!     StandardFramework,
-//!     help_commands,
-//!     Args,
-//!     HelpOptions,
-//!     CommandGroup,
-//!     CommandResult,
-//! };
-//! use serenity::framework::standard::macros::help;
-//! use serenity::model::prelude::{Message, UserId};
-//! use serenity::client::{EventHandler, Context, Client};
 //! use std::collections::HashSet;
 //! use std::env;
+//!
+//! use serenity::client::{Client, Context, EventHandler};
+//! use serenity::framework::standard::macros::help;
+//! use serenity::framework::standard::{
+//!     help_commands,
+//!     Args,
+//!     CommandGroup,
+//!     CommandResult,
+//!     HelpOptions,
+//!     StandardFramework,
+//! };
+//! use serenity::model::prelude::{Message, UserId};
 //!
 //! struct Handler;
 //!
@@ -26,12 +27,12 @@
 //!
 //! #[help]
 //! async fn my_help(
-//!    context: &Context,
-//!    msg: &Message,
-//!    args: Args,
-//!    help_options: &'static HelpOptions,
-//!    groups: &[&'static CommandGroup],
-//!    owners: HashSet<UserId>
+//!     context: &Context,
+//!     msg: &Message,
+//!     args: Args,
+//!     help_options: &'static HelpOptions,
+//!     groups: &[&'static CommandGroup],
+//!     owners: HashSet<UserId>,
 //! ) -> CommandResult {
 //! #  #[cfg(all(feature = "cache", feature = "http"))]
 //! # {
@@ -43,31 +44,28 @@
 //! # Ok(())
 //! }
 //!
-//! let framework = StandardFramework::new()
-//!     .help(&MY_HELP);
+//! let framework = StandardFramework::new().help(&MY_HELP);
 //! ```
 //!
 //! The same can be accomplished with no embeds by substituting `with_embeds`
 //! with the [`plain`] function.
 
 #[cfg(all(feature = "cache", feature = "http"))]
-use std::{
-    borrow::Borrow,
-    collections::HashSet,
-    fmt::Write,
-    ops::{Index, IndexMut},
-};
+use std::{collections::HashSet, fmt::Write};
 
 #[cfg(all(feature = "cache", feature = "http"))]
 use futures::future::{BoxFuture, FutureExt};
 #[cfg(all(feature = "cache", feature = "http"))]
+use levenshtein::levenshtein;
+#[cfg(all(feature = "cache", feature = "http"))]
 use tracing::warn;
 
+#[cfg(all(feature = "cache", feature = "http"))]
+use super::structures::Command as InternalCommand;
 #[cfg(all(feature = "cache", feature = "http"))]
 use super::{
     has_correct_permissions,
     has_correct_roles,
-    structures::Command as InternalCommand,
     Args,
     Check,
     CommandGroup,
@@ -76,13 +74,12 @@ use super::{
     HelpOptions,
     OnlyIn,
 };
-use crate::builder;
 #[cfg(all(feature = "cache", feature = "http"))]
 use crate::{
+    builder,
     cache::Cache,
     client::Context,
     framework::standard::CommonOptions,
-    http::CacheHttp,
     http::Http,
     model::channel::Message,
     model::id::{ChannelId, UserId},
@@ -100,15 +97,6 @@ macro_rules! format_command_name {
             HelpBehaviour::Nothing => format!("`{}`", $command_name),
             HelpBehaviour::Hide => continue,
         }
-    };
-}
-
-/// Wraps around [`warn`]-macro in order to keep
-/// the literal same for all formats of help.
-#[cfg(all(feature = "cache", feature = "http"))]
-macro_rules! warn_about_failed_send {
-    ($customised_help:expr, $error:expr) => {
-        warn!("Failed to send {:?} because: {:?}", $customised_help, $error);
     };
 }
 
@@ -156,30 +144,30 @@ pub struct Suggestions(pub Vec<SuggestedCommandName>);
 impl Suggestions {
     /// Immutably borrow inner [`Vec`].
     #[inline]
+    #[must_use]
     pub fn as_vec(&self) -> &Vec<SuggestedCommandName> {
         &self.0
     }
 
     /// Concats names of suggestions with a given `separator`.
+    #[must_use]
     pub fn join(&self, separator: &str) -> String {
-        let mut iter = self.as_vec().iter();
+        match self.as_vec().as_slice() {
+            [] => String::new(),
+            [one] => one.name.clone(),
+            [first, rest @ ..] => {
+                let size = first.name.len() + rest.iter().map(|e| e.name.len()).sum::<usize>();
+                let sep_size = rest.len() * separator.len();
 
-        let first_iter_element = match iter.next() {
-            Some(first_iter_element) => first_iter_element,
-            None => return String::new(),
-        };
-
-        let size = self.as_vec().iter().fold(0, |total_size, size| total_size + size.name.len());
-        let byte_len_of_sep = self.as_vec().len().saturating_sub(1) * separator.len();
-        let mut result = String::with_capacity(size + byte_len_of_sep);
-        result.push_str(first_iter_element.name.borrow());
-
-        for element in iter {
-            result.push_str(&*separator);
-            result.push_str(element.name.borrow());
+                let mut joined = String::with_capacity(size + sep_size);
+                joined.push_str(&first.name);
+                for e in rest {
+                    joined.push_str(separator);
+                    joined.push_str(&e.name);
+                }
+                joined
+            },
         }
-
-        result
     }
 }
 
@@ -199,94 +187,21 @@ pub enum CustomisedHelpData<'a> {
     NoCommandFound { help_error_message: &'a str },
 }
 
-/// Wraps around a `Vec<Vec<T>>` and provides access
-/// via indexing of tuples representing x and y.
-#[derive(Debug)]
-#[cfg(all(feature = "cache", feature = "http"))]
-struct Matrix {
-    vec: Vec<usize>,
-    width: usize,
-}
-
-#[cfg(all(feature = "cache", feature = "http"))]
-impl Matrix {
-    fn new(columns: usize, rows: usize) -> Matrix {
-        Matrix {
-            vec: vec![0; columns * rows],
-            width: rows,
-        }
-    }
-}
-
-#[cfg(all(feature = "cache", feature = "http"))]
-impl Index<(usize, usize)> for Matrix {
-    type Output = usize;
-
-    fn index(&self, matrix_entry: (usize, usize)) -> &usize {
-        &self.vec[matrix_entry.1 * self.width + matrix_entry.0]
-    }
-}
-
-#[cfg(all(feature = "cache", feature = "http"))]
-impl IndexMut<(usize, usize)> for Matrix {
-    fn index_mut(&mut self, matrix_entry: (usize, usize)) -> &mut usize {
-        &mut self.vec[matrix_entry.1 * self.width + matrix_entry.0]
-    }
-}
-
-/// Calculates and returns levenshtein distance between
-/// two passed words.
-#[cfg(all(feature = "cache", feature = "http"))]
-pub(crate) fn levenshtein_distance(word_a: &str, word_b: &str) -> usize {
-    let len_a = word_a.chars().count();
-    let len_b = word_b.chars().count();
-
-    if len_a == 0 {
-        return len_b;
-    } else if len_b == 0 {
-        return len_a;
-    }
-
-    let mut matrix = Matrix::new(len_b + 1, len_a + 1);
-
-    for x in 0..len_a {
-        matrix[(x + 1, 0)] = matrix[(x, 0)] + 1;
-    }
-
-    for y in 0..len_b {
-        matrix[(0, y + 1)] = matrix[(0, y)] + 1;
-    }
-
-    for (x, char_a) in word_a.chars().enumerate() {
-        for (y, char_b) in word_b.chars().enumerate() {
-            matrix[(x + 1, y + 1)] = (matrix[(x, y + 1)] + 1)
-                .min(matrix[(x + 1, y)] + 1)
-                .min(matrix[(x, y)] + if char_a == char_b { 0 } else { 1 });
-        }
-    }
-
-    matrix[(len_a, len_b)]
-}
-
 /// Checks whether a user is member of required roles
 /// and given the required permissions.
 #[cfg(feature = "cache")]
-pub async fn has_all_requirements(
-    cache_http: impl CacheHttp + AsRef<Cache>,
-    cmd: &CommandOptions,
-    msg: &Message,
-) -> bool {
-    let cache = cache_http.as_ref();
+pub fn has_all_requirements(cache: impl AsRef<Cache>, cmd: &CommandOptions, msg: &Message) -> bool {
+    let cache = cache.as_ref();
 
     if let Some(guild_id) = msg.guild_id {
-        if let Some(member) = cache.member(guild_id, &msg.author.id).await {
-            if let Ok(permissions) = member.permissions(&cache_http).await {
+        if let Some(member) = cache.member(guild_id, &msg.author.id) {
+            if let Ok(permissions) = member.permissions(&cache) {
                 return if cmd.allowed_roles.is_empty() {
-                    permissions.administrator() || has_correct_permissions(&cache, &cmd, msg).await
-                } else if let Some(roles) = cache.guild_roles(guild_id).await {
+                    permissions.administrator() || has_correct_permissions(&cache, &cmd, msg)
+                } else if let Some(roles) = cache.guild_roles(guild_id) {
                     permissions.administrator()
                         || (has_correct_roles(&cmd, &roles, &member)
-                            && has_correct_permissions(&cache, &cmd, msg).await)
+                            && has_correct_permissions(&cache, &cmd, msg))
                 } else {
                     warn!("Failed to find the guild and its roles.");
 
@@ -310,11 +225,11 @@ fn starts_with_whole_word(search_on: &str, word: &str) -> bool {
 
 // Decides how a listed help entry shall be displayed.
 #[cfg(all(feature = "cache", feature = "http"))]
-async fn check_common_behaviour(
-    cache_http: impl CacheHttp + AsRef<Cache>,
+fn check_common_behaviour(
+    cache: impl AsRef<Cache>,
     msg: &Message,
     options: &impl CommonOptions,
-    owners: &HashSet<UserId>,
+    owners: &HashSet<UserId, impl std::hash::BuildHasher + Send + Sync>,
     help_options: &HelpOptions,
 ) -> HelpBehaviour {
     if !options.help_available() {
@@ -335,11 +250,11 @@ async fn check_common_behaviour(
         return HelpBehaviour::Nothing;
     }
 
-    if !has_correct_permissions(&cache_http, options, msg).await {
+    if !has_correct_permissions(&cache, options, msg) {
         return help_options.lacking_permissions;
     }
 
-    msg.guild_field(&cache_http, |guild| {
+    msg.guild_field(&cache, |guild| {
         if let Some(member) = guild.members.get(&msg.author.id) {
             if !has_correct_roles(options, &guild.roles, member) {
                 return help_options.lacking_role;
@@ -348,7 +263,6 @@ async fn check_common_behaviour(
 
         HelpBehaviour::Nothing
     })
-    .await
     .unwrap_or(HelpBehaviour::Nothing)
 }
 
@@ -358,10 +272,10 @@ async fn check_command_behaviour(
     msg: &Message,
     options: &CommandOptions,
     group_checks: &[&Check],
-    owners: &HashSet<UserId>,
+    owners: &HashSet<UserId, impl std::hash::BuildHasher + Send + Sync>,
     help_options: &HelpOptions,
 ) -> HelpBehaviour {
-    let behaviour = check_common_behaviour(&ctx, msg, &options, owners, help_options).await;
+    let behaviour = check_common_behaviour(&ctx, msg, &options, owners, help_options);
 
     if behaviour == HelpBehaviour::Nothing
         && (!options.owner_privilege || !owners.contains(&msg.author.id))
@@ -391,12 +305,11 @@ fn nested_commands_search<'rec, 'a: 'rec>(
     ctx: &'rec Context,
     msg: &'rec Message,
     group: &'rec CommandGroup,
-    found_group_prefix: &'rec mut bool,
     commands: &'rec [&'static InternalCommand],
     name: &'rec mut String,
     help_options: &'a HelpOptions,
     similar_commands: &'rec mut Vec<SuggestedCommandName>,
-    owners: &'rec HashSet<UserId>,
+    owners: &'rec HashSet<UserId, impl std::hash::BuildHasher + Send + Sync>,
 ) -> BoxFuture<'rec, Option<&'a InternalCommand>> {
     async move {
         for command in commands {
@@ -427,7 +340,7 @@ fn nested_commands_search<'rec, 'a: 'rec>(
                         }
 
                         if help_options.max_levenshtein_distance > 0 {
-                            let levenshtein_distance = levenshtein_distance(command_name, name);
+                            let levenshtein_distance = levenshtein(command_name, name);
 
                             if levenshtein_distance <= help_options.max_levenshtein_distance
                                 && HelpBehaviour::Nothing
@@ -442,7 +355,7 @@ fn nested_commands_search<'rec, 'a: 'rec>(
                                     .await
                             {
                                 similar_commands.push(SuggestedCommandName {
-                                    name: command_name.to_string(),
+                                    name: (*command_name).to_string(),
                                     levenshtein_distance,
                                 });
                             }
@@ -457,7 +370,7 @@ fn nested_commands_search<'rec, 'a: 'rec>(
                         .sub_commands
                         .iter()
                         .find(|n| n.options.names.contains(&name_str))
-                        .cloned();
+                        .copied();
 
                     // If we found a sub-command, we replace the parent with
                     // it. This allows the help-system to extract information
@@ -486,7 +399,6 @@ fn nested_commands_search<'rec, 'a: 'rec>(
                             ctx,
                             msg,
                             group,
-                            found_group_prefix,
                             command.options.sub_commands,
                             name,
                             help_options,
@@ -515,9 +427,8 @@ fn nested_commands_search<'rec, 'a: 'rec>(
                     .await
                 {
                     return Some(command);
-                } else {
-                    break;
                 }
+                break;
             }
         }
 
@@ -537,13 +448,13 @@ fn nested_group_command_search<'rec, 'a: 'rec>(
     name: &'rec mut String,
     help_options: &'a HelpOptions,
     similar_commands: &'rec mut Vec<SuggestedCommandName>,
-    owners: &'rec HashSet<UserId>,
+    owners: &'rec HashSet<UserId, impl std::hash::BuildHasher + Send + Sync>,
 ) -> BoxFuture<'rec, Result<CustomisedHelpData<'a>, ()>> {
     async move {
         for group in groups {
             let group = *group;
             let group_behaviour =
-                check_common_behaviour(&ctx, msg, &group.options, owners, help_options).await;
+                check_common_behaviour(&ctx, msg, &group.options, owners, help_options);
 
             match &group_behaviour {
                 HelpBehaviour::Nothing => (),
@@ -558,12 +469,10 @@ fn nested_group_command_search<'rec, 'a: 'rec>(
                 continue;
             }
 
-            let mut found_group_prefix: bool = false;
             let found = nested_commands_search(
                 ctx,
                 msg,
                 group,
-                &mut found_group_prefix,
                 group.options.commands,
                 name,
                 help_options,
@@ -636,7 +545,7 @@ fn nested_group_command_search<'rec, 'a: 'rec>(
                 });
             }
 
-            match nested_group_command_search(
+            if let Ok(found) = nested_group_command_search(
                 ctx,
                 msg,
                 group.options.sub_groups,
@@ -647,8 +556,7 @@ fn nested_group_command_search<'rec, 'a: 'rec>(
             )
             .await
             {
-                Ok(found) => return Ok(found),
-                Err(()) => (),
+                return Ok(found);
             }
         }
 
@@ -666,7 +574,7 @@ async fn fetch_single_command<'a>(
     groups: &[&'static CommandGroup],
     name: &'a str,
     help_options: &'a HelpOptions,
-    owners: &HashSet<UserId>,
+    owners: &HashSet<UserId, impl std::hash::BuildHasher + Send + Sync>,
 ) -> Result<CustomisedHelpData<'a>, Vec<SuggestedCommandName>> {
     let mut similar_commands: Vec<SuggestedCommandName> = Vec::new();
     let mut name = name.to_string();
@@ -693,7 +601,7 @@ async fn fill_eligible_commands<'a>(
     ctx: &Context,
     msg: &Message,
     commands: &[&'static InternalCommand],
-    owners: &HashSet<UserId>,
+    owners: &HashSet<UserId, impl std::hash::BuildHasher + Send + Sync>,
     help_options: &'a HelpOptions,
     group: &'a CommandGroup,
     to_fill: &mut GroupCommandsPair,
@@ -708,7 +616,7 @@ async fn fill_eligible_commands<'a>(
         } else {
             std::cmp::max(
                 *highest_formatter,
-                check_common_behaviour(&ctx, msg, &group.options, owners, help_options).await,
+                check_common_behaviour(&ctx, msg, &group.options, owners, help_options),
             )
         }
     };
@@ -720,14 +628,11 @@ async fn fill_eligible_commands<'a>(
         let options = &command.options;
         let name = &options.names[0];
 
-        match &group_behaviour {
-            HelpBehaviour::Nothing => (),
-            _ => {
-                let name = format_command_name!(&group_behaviour, &name);
-                to_fill.command_names.push(name);
+        if group_behaviour != HelpBehaviour::Nothing {
+            let name = format_command_name!(&group_behaviour, &name);
+            to_fill.command_names.push(name);
 
-                continue;
-            },
+            continue;
         }
 
         let command_behaviour = check_command_behaviour(
@@ -753,7 +658,7 @@ fn fetch_all_eligible_commands_in_group<'rec, 'a: 'rec>(
     ctx: &'rec Context,
     msg: &'rec Message,
     commands: &'rec [&'static InternalCommand],
-    owners: &'rec HashSet<UserId>,
+    owners: &'rec HashSet<UserId, impl std::hash::BuildHasher + Send + Sync>,
     help_options: &'a HelpOptions,
     group: &'a CommandGroup,
     highest_formatter: HelpBehaviour,
@@ -808,7 +713,7 @@ async fn create_command_group_commands_pair_from_groups<'a>(
     ctx: &Context,
     msg: &Message,
     groups: &[&'static CommandGroup],
-    owners: &HashSet<UserId>,
+    owners: &HashSet<UserId, impl std::hash::BuildHasher + Send + Sync>,
     help_options: &'a HelpOptions,
 ) -> Vec<GroupCommandsPair> {
     let mut listed_groups: Vec<GroupCommandsPair> = Vec::default();
@@ -832,7 +737,7 @@ async fn create_single_group(
     ctx: &Context,
     msg: &Message,
     group: &CommandGroup,
-    owners: &HashSet<UserId>,
+    owners: &HashSet<UserId, impl std::hash::BuildHasher + Send + Sync>,
     help_options: &HelpOptions,
 ) -> GroupCommandsPair {
     let mut group_with_cmds = fetch_all_eligible_commands_in_group(
@@ -872,12 +777,11 @@ fn trim_prefixless_group(group_name: &str, searched_group: &mut String) -> bool 
 }
 
 #[cfg(feature = "cache")]
-#[allow(clippy::implicit_hasher)]
 pub fn searched_lowercase<'rec, 'a: 'rec>(
     ctx: &'rec Context,
     msg: &'rec Message,
     group: &'rec CommandGroup,
-    owners: &'rec HashSet<UserId>,
+    owners: &'rec HashSet<UserId, impl std::hash::BuildHasher + Send + Sync>,
     help_options: &'a HelpOptions,
     searched_named_lowercase: &'rec mut String,
 ) -> BoxFuture<'rec, Option<CustomisedHelpData<'a>>> {
@@ -905,7 +809,7 @@ pub fn searched_lowercase<'rec, 'a: 'rec>(
                         .options
                         .description
                         .as_ref()
-                        .map(|s| s.to_string())
+                        .map(ToString::to_string)
                         .unwrap_or_default(),
                     groups: vec![single_group],
                 });
@@ -936,13 +840,12 @@ pub fn searched_lowercase<'rec, 'a: 'rec>(
 /// taking [`HelpOptions`] into consideration when deciding on whether a command
 /// shall be picked and in what textual format.
 #[cfg(feature = "cache")]
-#[allow(clippy::implicit_hasher)]
 pub async fn create_customised_help_data<'a>(
     ctx: &Context,
     msg: &Message,
     args: &'a Args,
-    groups: &[&'static CommandGroup],
-    owners: &HashSet<UserId>,
+    groups: &'a [&'static CommandGroup],
+    owners: &HashSet<UserId, impl std::hash::BuildHasher + Send + Sync>,
     help_options: &'a HelpOptions,
 ) -> CustomisedHelpData<'a> {
     if !args.is_empty() {
@@ -983,13 +886,13 @@ pub async fn create_customised_help_data<'a>(
     }
 
     let strikethrough_command_tip = if msg.is_private() {
-        &help_options.strikethrough_commands_tip_in_dm
+        help_options.strikethrough_commands_tip_in_dm
     } else {
-        &help_options.strikethrough_commands_tip_in_guild
+        help_options.strikethrough_commands_tip_in_guild
     };
 
-    let description = if let Some(ref strikethrough_command_text) = strikethrough_command_tip {
-        format!("{}\n{}", &help_options.individual_command_tip, &strikethrough_command_text)
+    let description = if let Some(strikethrough_command_text) = strikethrough_command_tip {
+        format!("{}\n{}", help_options.individual_command_tip, strikethrough_command_text)
     } else {
         help_options.individual_command_tip.to_string()
     };
@@ -1073,7 +976,6 @@ fn flatten_group_to_string(
 /// buffer respecting the plain help format.
 /// If `nest_level` is `0`, this function will skip the group's name.
 #[cfg(all(feature = "cache", feature = "http"))]
-#[allow(clippy::let_underscore_must_use)]
 fn flatten_group_to_plain_string(
     group_text: &mut String,
     group: &GroupCommandsPair,
@@ -1083,30 +985,30 @@ fn flatten_group_to_plain_string(
     let repeated_indent_str = help_options.indention_prefix.repeat(nest_level);
 
     if nest_level > 0 {
-        let _ = write!(group_text, "\n{}**{}**", repeated_indent_str, group.name,);
+        write!(group_text, "\n{}**{}**", repeated_indent_str, group.name).unwrap();
     }
 
     if group.prefixes.is_empty() {
-        let _ = write!(group_text, ": ");
+        group_text.push_str(": ");
     } else {
-        let _ = write!(
+        write!(
             group_text,
             " ({}: `{}`): ",
             help_options.group_prefix,
             group.prefixes.join("`, `"),
-        );
+        ).unwrap();
     }
 
     let joined_commands = group.command_names.join(", ");
 
-    let _ = write!(group_text, "{}", joined_commands);
+    group_text.push_str(&joined_commands);
 
     for sub_group in &group.sub_groups {
         let mut sub_group_text = String::default();
 
         flatten_group_to_plain_string(&mut sub_group_text, sub_group, nest_level + 1, help_options);
 
-        let _ = write!(group_text, "{}", sub_group_text);
+        group_text.push_str(&sub_group_text);
     }
 }
 
@@ -1152,12 +1054,12 @@ async fn send_single_command_embed(
                 embed.title(&command.name);
                 embed.colour(colour);
 
-                if let Some(ref desc) = command.description {
+                if let Some(desc) = command.description {
                     embed.description(desc);
                 }
 
-                if let Some(ref usage) = command.usage {
-                    let full_usage_text = if let Some(first_prefix) = command.group_prefixes.get(0)
+                if let Some(usage) = command.usage {
+                    let full_usage_text = if let Some(first_prefix) = command.group_prefixes.first()
                     {
                         format!("`{} {} {}`", first_prefix, command.name, usage)
                     } else {
@@ -1169,7 +1071,7 @@ async fn send_single_command_embed(
 
                 if !command.usage_sample.is_empty() {
                     let full_example_text = if let Some(first_prefix) =
-                        command.group_prefixes.get(0)
+                        command.group_prefixes.first()
                     {
                         let format_example =
                             |example| format!("`{} {} {}`\n", first_prefix, command.name, example);
@@ -1229,16 +1131,7 @@ async fn send_suggestion_embed(
 ) -> Result<Message, Error> {
     let text = help_description.replace("{}", &suggestions.join("`, `"));
 
-    channel_id
-        .send_message(&http, |m| {
-            m.embed(|e| {
-                e.colour(colour);
-                e.description(text);
-                e
-            });
-            m
-        })
-        .await
+    channel_id.send_message(&http, |m| m.embed(|e| e.colour(colour).description(text))).await
 }
 
 /// Sends an embed explaining fetching commands failed.
@@ -1249,16 +1142,7 @@ async fn send_error_embed(
     input: &str,
     colour: Colour,
 ) -> Result<Message, Error> {
-    channel_id
-        .send_message(&http, |m| {
-            m.embed(|e| {
-                e.colour(colour);
-                e.description(input);
-                e
-            });
-            m
-        })
-        .await
+    channel_id.send_message(&http, |m| m.embed(|e| e.colour(colour).description(input))).await
 }
 
 /// Posts an embed showing each individual command group and its commands.
@@ -1269,11 +1153,19 @@ async fn send_error_embed(
 ///
 /// ```rust,no_run
 /// # use serenity::prelude::*;
-/// use std::{collections::HashSet, hash::BuildHasher};
-/// use serenity::{framework::standard::{Args, CommandGroup, CommandResult,
-///     StandardFramework, macros::help, HelpOptions,
-///     help_commands::*}, model::prelude::*,
+/// use std::collections::HashSet;
+/// use std::hash::BuildHasher;
+///
+/// use serenity::framework::standard::help_commands::*;
+/// use serenity::framework::standard::macros::help;
+/// use serenity::framework::standard::{
+///     Args,
+///     CommandGroup,
+///     CommandResult,
+///     HelpOptions,
+///     StandardFramework,
 /// };
+/// use serenity::model::prelude::*;
 ///
 /// #[help]
 /// async fn my_help(
@@ -1282,31 +1174,33 @@ async fn send_error_embed(
 ///     args: Args,
 ///     help_options: &'static HelpOptions,
 ///     groups: &[&'static CommandGroup],
-///     owners: HashSet<UserId>
+///     owners: HashSet<UserId>,
 /// ) -> CommandResult {
-///     let _ = with_embeds(context, msg, args, &help_options, groups, owners).await;
+///     let _ = with_embeds(context, msg, args, &help_options, groups, owners).await?;
 ///     Ok(())
 /// }
 ///
-/// let framwork = StandardFramework::new()
-///     .help(&MY_HELP);
+/// let framework = StandardFramework::new().help(&MY_HELP);
 /// ```
+///
+/// # Errors
+///
+/// Returns the same errors as [`ChannelId::send_message`].
 ///
 /// [`StandardFramework::help`]: crate::framework::standard::StandardFramework::help
 #[cfg(all(feature = "cache", feature = "http"))]
-#[allow(clippy::implicit_hasher)]
 pub async fn with_embeds(
     ctx: &Context,
     msg: &Message,
     args: Args,
     help_options: &HelpOptions,
     groups: &[&'static CommandGroup],
-    owners: HashSet<UserId>,
-) -> Option<Message> {
+    owners: HashSet<UserId, impl std::hash::BuildHasher + Send + Sync>,
+) -> Result<Message, Error> {
     let formatted_help =
         create_customised_help_data(ctx, msg, &args, groups, &owners, help_options).await;
 
-    let response_result = match formatted_help {
+    match formatted_help {
         CustomisedHelpData::SuggestedCommands {
             ref help_description,
             ref suggestions,
@@ -1357,20 +1251,11 @@ pub async fn with_embeds(
             )
             .await
         },
-    };
-
-    match response_result {
-        Ok(response) => Some(response),
-        Err(why) => {
-            warn_about_failed_send!(&formatted_help, why);
-            None
-        },
     }
 }
 
 /// Turns grouped commands into a [`String`] taking plain help format into account.
 #[cfg(all(feature = "cache", feature = "http"))]
-#[allow(clippy::let_underscore_must_use)]
 fn grouped_commands_to_plain_string(
     help_options: &HelpOptions,
     help_description: &str,
@@ -1378,10 +1263,11 @@ fn grouped_commands_to_plain_string(
 ) -> String {
     let mut result = "__**Commands**__\n".to_string();
 
-    let _ = writeln!(result, "{}", &help_description);
+    result.push_str(help_description);
+    result.push('\n');
 
     for group in groups {
-        let _ = write!(result, "\n**{}**", &group.name);
+        write!(result, "\n**{}**", &group.name).unwrap();
 
         flatten_group_to_plain_string(&mut result, group, 0, help_options);
     }
@@ -1391,73 +1277,72 @@ fn grouped_commands_to_plain_string(
 
 /// Turns a single command into a [`String`] taking plain help format into account.
 #[cfg(all(feature = "cache", feature = "http"))]
-#[allow(clippy::let_underscore_must_use)]
 fn single_command_to_plain_string(help_options: &HelpOptions, command: &Command<'_>) -> String {
-    let mut result = String::default();
+    let mut result = String::new();
 
-    let _ = writeln!(result, "__**{}**__", command.name);
+    writeln!(result, "__**{}**__", command.name).unwrap();
 
     if !command.aliases.is_empty() {
-        let _ = writeln!(
-            result,
-            "**{}**: `{}`",
-            help_options.aliases_label,
-            command.aliases.join("`, `")
-        );
+        write!(result, "**{}**: `{}`", help_options.aliases_label, command.aliases.join("`, `"))
+            .unwrap();
     }
 
-    if let Some(ref description) = command.description {
-        let _ = writeln!(result, "**{}**: {}", help_options.description_label, description);
+    if let Some(description) = command.description {
+        writeln!(result, "**{}**: {}", help_options.description_label, description).unwrap();
     };
 
-    if let Some(ref usage) = command.usage {
-        if let Some(first_prefix) = command.group_prefixes.get(0) {
-            let _ = writeln!(
+    if let Some(usage) = command.usage {
+        if let Some(first_prefix) = command.group_prefixes.first() {
+            writeln!(
                 result,
                 "**{}**: `{} {} {}`",
                 help_options.usage_label, first_prefix, command.name, usage
-            );
+            )
+            .unwrap();
         } else {
-            let _ =
-                writeln!(result, "**{}**: `{} {}`", help_options.usage_label, command.name, usage);
+            writeln!(result, "**{}**: `{} {}`", help_options.usage_label, command.name, usage)
+                .unwrap();
         }
     }
 
     if !command.usage_sample.is_empty() {
-        if let Some(first_prefix) = command.group_prefixes.get(0) {
+        if let Some(first_prefix) = command.group_prefixes.first() {
             let format_example = |example| {
-                let _ = writeln!(
+                writeln!(
                     result,
                     "**{}**: `{} {} {}`",
                     help_options.usage_sample_label, first_prefix, command.name, example
-                );
+                )
+                .unwrap();
             };
             command.usage_sample.iter().for_each(format_example);
         } else {
             let format_example = |example| {
-                let _ = writeln!(
+                writeln!(
                     result,
                     "**{}**: `{} {}`",
                     help_options.usage_sample_label, command.name, example
-                );
+                )
+                .unwrap();
             };
             command.usage_sample.iter().for_each(format_example);
         }
     }
 
-    let _ = writeln!(result, "**{}**: {}", help_options.grouped_label, command.group_name);
+    writeln!(result, "**{}**: {}", help_options.grouped_label, command.group_name).unwrap();
 
     if !help_options.available_text.is_empty() && !command.availability.is_empty() {
-        let _ = writeln!(result, "**{}**: {}", help_options.available_text, command.availability);
+        writeln!(result, "**{}**: {}", help_options.available_text, command.availability).unwrap();
     }
 
     if !command.sub_commands.is_empty() {
-        let _ = writeln!(
+        writeln!(
             result,
-            "**{}**: {}",
+            "**{}**: `{}`",
             help_options.sub_commands_label,
-            format!("`{}`", command.sub_commands.join("`, `"))
-        );
+            command.sub_commands.join("`, `"),
+        )
+        .unwrap();
     }
 
     result
@@ -1471,11 +1356,19 @@ fn single_command_to_plain_string(help_options: &HelpOptions, command: &Command<
 ///
 /// ```rust,no_run
 /// # use serenity::prelude::*;
-/// use std::{collections::HashSet, hash::BuildHasher};
-/// use serenity::{framework::standard::{Args, CommandGroup, CommandResult,
-///     StandardFramework, macros::help, HelpOptions,
-///     help_commands::*}, model::prelude::*,
+/// use std::collections::HashSet;
+/// use std::hash::BuildHasher;
+///
+/// use serenity::framework::standard::help_commands::*;
+/// use serenity::framework::standard::macros::help;
+/// use serenity::framework::standard::{
+///     Args,
+///     CommandGroup,
+///     CommandResult,
+///     HelpOptions,
+///     StandardFramework,
 /// };
+/// use serenity::model::prelude::*;
 ///
 /// #[help]
 /// async fn my_help(
@@ -1484,25 +1377,26 @@ fn single_command_to_plain_string(help_options: &HelpOptions, command: &Command<
 ///     args: Args,
 ///     help_options: &'static HelpOptions,
 ///     groups: &[&'static CommandGroup],
-///     owners: HashSet<UserId>
+///     owners: HashSet<UserId>,
 /// ) -> CommandResult {
-///     let _ = plain(context, msg, args, &help_options, groups, owners).await;
+///     let _ = plain(context, msg, args, &help_options, groups, owners).await?;
 ///     Ok(())
 /// }
 ///
-/// let framework = StandardFramework::new()
-///     .help(&MY_HELP);
+/// let framework = StandardFramework::new().help(&MY_HELP);
 /// ```
+/// # Errors
+///
+/// Returns the same errors as [`ChannelId::send_message`].
 #[cfg(all(feature = "cache", feature = "http"))]
-#[allow(clippy::implicit_hasher)]
 pub async fn plain(
     ctx: &Context,
     msg: &Message,
     args: Args,
     help_options: &HelpOptions,
     groups: &[&'static CommandGroup],
-    owners: HashSet<UserId>,
-) -> Option<Message> {
+    owners: HashSet<UserId, impl std::hash::BuildHasher + Send + Sync>,
+) -> Result<Message, Error> {
     let formatted_help =
         create_customised_help_data(ctx, msg, &args, groups, &owners, help_options).await;
 
@@ -1512,7 +1406,7 @@ pub async fn plain(
             ref suggestions,
         } => help_description.replace("{}", &suggestions.join("`, `")),
         CustomisedHelpData::NoCommandFound {
-            ref help_error_message,
+            help_error_message,
         } => help_error_message.to_string(),
         CustomisedHelpData::GroupedCommands {
             ref help_description,
@@ -1523,95 +1417,34 @@ pub async fn plain(
         } => single_command_to_plain_string(help_options, command),
     };
 
-    match msg.channel_id.say(&ctx, result).await {
-        Ok(response) => Some(response),
-        Err(why) => {
-            warn_about_failed_send!(&formatted_help, why);
-            None
-        },
-    }
+    msg.channel_id.say(&ctx, result).await
 }
 
 #[cfg(test)]
 #[cfg(all(feature = "cache", feature = "http"))]
-mod levenshtein_tests {
-    use super::levenshtein_distance;
+mod tests {
+    use super::{SuggestedCommandName, Suggestions};
 
     #[test]
-    fn reflexive() {
-        let word_a = "rusty ferris";
-        let word_b = "rusty ferris";
-        assert_eq!(0, levenshtein_distance(word_a, word_b));
+    fn suggestions_join() {
+        let names = vec![
+            SuggestedCommandName {
+                name: "aa".to_owned(),
+                levenshtein_distance: 0,
+            },
+            SuggestedCommandName {
+                name: "bbb".to_owned(),
+                levenshtein_distance: 0,
+            },
+            SuggestedCommandName {
+                name: "cccc".to_owned(),
+                levenshtein_distance: 0,
+            },
+        ];
 
-        let word_a = "";
-        let word_b = "";
-        assert_eq!(0, levenshtein_distance(word_a, word_b));
+        let actual = Suggestions(names).join(", ");
 
-        let word_a = "rusty ferris";
-        let word_b = "RuSty FerriS";
-        assert_eq!(4, levenshtein_distance(word_a, word_b));
-    }
-
-    #[test]
-    fn symmetric() {
-        let word_a = "ferris";
-        let word_b = "rusty ferris";
-        assert_eq!(6, levenshtein_distance(word_a, word_b));
-
-        let word_a = "rusty ferris";
-        let word_b = "ferris";
-        assert_eq!(6, levenshtein_distance(word_a, word_b));
-
-        let word_a = "";
-        let word_b = "ferris";
-        assert_eq!(6, levenshtein_distance(word_a, word_b));
-
-        let word_a = "ferris";
-        let word_b = "";
-        assert_eq!(6, levenshtein_distance(word_a, word_b));
-    }
-
-    #[test]
-    fn transitive() {
-        let word_a = "ferris";
-        let word_b = "turbo fish";
-        let word_c = "unsafe";
-
-        let distance_of_a_c = levenshtein_distance(word_a, word_c);
-        let distance_of_a_b = levenshtein_distance(word_a, word_b);
-        let distance_of_b_c = levenshtein_distance(word_b, word_c);
-
-        assert!(distance_of_a_c <= (distance_of_a_b + distance_of_b_c));
-    }
-}
-
-#[cfg(test)]
-#[cfg(all(feature = "cache", feature = "http"))]
-mod matrix_tests {
-    use super::Matrix;
-
-    #[test]
-    fn index_mut() {
-        let mut matrix = Matrix::new(5, 5);
-        assert_eq!(matrix[(1, 1)], 0);
-
-        matrix[(1, 1)] = 10;
-        assert_eq!(matrix[(1, 1)], 10);
-    }
-
-    #[test]
-    #[allow(clippy::no_effect)]
-    #[should_panic(expected = "the len is 4 but the index is 9")]
-    fn panic_index_too_high() {
-        let matrix = Matrix::new(2, 2);
-        matrix[(3, 3)];
-    }
-
-    #[test]
-    #[allow(clippy::no_effect)]
-    #[should_panic(expected = "the len is 0 but the index is 0")]
-    fn panic_indexing_when_empty() {
-        let matrix = Matrix::new(0, 0);
-        matrix[(0, 0)];
+        assert_eq!(actual, "aa, bbb, cccc");
+        assert_eq!(actual.capacity(), 13);
     }
 }

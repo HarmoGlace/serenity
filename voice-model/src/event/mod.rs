@@ -2,22 +2,14 @@ mod from;
 #[cfg(test)]
 mod tests;
 
-use crate::{opcode::OpCode, payload::*};
-use serde::{
-    de::{
-        value::U8Deserializer,
-        Deserializer,
-        Error as DeError,
-        IntoDeserializer,
-        MapAccess,
-        Unexpected,
-        Visitor,
-    },
-    ser::{SerializeStruct, Serializer},
-    Deserialize,
-    Serialize,
-};
+use serde::de::value::U8Deserializer;
+use serde::de::{Deserializer, Error as DeError, IntoDeserializer, MapAccess, Unexpected, Visitor};
+use serde::ser::{SerializeStruct, Serializer};
+use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
+
+use crate::opcode::OpCode;
+use crate::payload::*;
 
 /// A representation of data received for voice gateway events.
 #[derive(Clone, Debug)]
@@ -108,7 +100,7 @@ impl<'de> Visitor<'de> for EventVisitor {
     type Value = Event;
 
     fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(formatter, "a map with at least two keys ('d', 'op')")
+        formatter.write_str("a map with at least two keys ('d', 'op')")
     }
 
     fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
@@ -172,9 +164,7 @@ impl<'de> Visitor<'de> for EventVisitor {
             }
         }
 
-        let d = d
-            .expect("Struct body known to exist if loop has been escaped.")
-            .get();
+        let d = d.expect("Struct body known to exist if loop has been escaped.").get();
         let op = op.expect("Struct variant known to exist if loop has been escaped.");
 
         (match op {

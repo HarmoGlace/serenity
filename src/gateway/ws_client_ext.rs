@@ -2,15 +2,15 @@ use std::env::consts;
 use std::time::SystemTime;
 
 use async_trait::async_trait;
-use serde_json::json;
-use tracing::instrument;
-use tracing::{debug, trace};
+use tracing::{debug, instrument, trace};
 
-use crate::client::bridge::gateway::{ChunkGuildFilter, GatewayIntents};
+use crate::client::bridge::gateway::ChunkGuildFilter;
 use crate::constants::{self, OpCode};
 use crate::gateway::{CurrentPresence, WsStream};
 use crate::internal::prelude::*;
 use crate::internal::ws_impl::SenderExt;
+use crate::json::json;
+use crate::model::gateway::GatewayIntents;
 use crate::model::id::GuildId;
 
 #[async_trait]
@@ -75,7 +75,7 @@ impl WebSocketGatewayClientExt for WsStream {
             ChunkGuildFilter::Query(query) => payload["d"]["query"] = json!(query),
             ChunkGuildFilter::UserIds(user_ids) => {
                 let ids = user_ids.iter().map(|x| x.0).collect::<Vec<u64>>();
-                payload["d"]["user_ids"] = json!(ids)
+                payload["d"]["user_ids"] = json!(ids);
             },
         };
 

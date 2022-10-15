@@ -1,9 +1,7 @@
 //! Error enum definition wrapping potential model implementation errors.
 
-use std::{
-    error::Error as StdError,
-    fmt::{Display, Formatter, Result as FmtResult},
-};
+use std::error::Error as StdError;
+use std::fmt;
 
 use super::Permissions;
 
@@ -20,10 +18,10 @@ use super::Permissions;
 /// ```rust,no_run
 /// # #[cfg(all(feature = "client", feature = "model"))]
 /// # async fn run() -> Result<(), Box<std::error::Error>> {
-/// use serenity::prelude::*;
 /// use serenity::model::prelude::*;
-/// use serenity::Error;
 /// use serenity::model::ModelError;
+/// use serenity::prelude::*;
+/// use serenity::Error;
 ///
 /// struct Handler;
 ///
@@ -49,7 +47,8 @@ use super::Permissions;
 ///     }
 /// }
 /// let token = std::env::var("DISCORD_BOT_TOKEN")?;
-/// let mut client = Client::builder(&token).event_handler(Handler).await?;
+/// let mut client =
+///     Client::builder(&token, GatewayIntents::default()).event_handler(Handler).await?;
 ///
 /// client.start().await?;
 /// #     Ok(())
@@ -164,13 +163,19 @@ pub enum Error {
     NotAuthor,
     /// Indicates that the webhook token is missing.
     NoTokenSet,
-    /// Indicates that the component type cannot be used in this context.
-    InvalidComponentType,
+    /// When attempting to delete a built in nitro sticker instead of a guild
+    /// sticker.
+    DeleteNitroSticker,
+    /// Indicates that the sticker file is missing.
+    NoStickerFileSet,
+    /// When attempting to send a message with over 3 stickers.
+    StickerAmount,
 }
 
 impl Error {
     /// Return `true` if the model error is related to an item missing in the
     /// cache.
+    #[must_use]
     pub fn is_cache_err(&self) -> bool {
         matches!(
             self,
@@ -183,32 +188,34 @@ impl Error {
     }
 }
 
-impl Display for Error {
-    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Error::BulkDeleteAmount => f.write_str("Too few/many messages to bulk delete."),
-            Error::DeleteMessageDaysAmount(_) => f.write_str("Invalid delete message days."),
-            Error::EmbedAmount => f.write_str("Too many embeds in a message."),
-            Error::EmbedTooLarge(_) => f.write_str("Embed too large."),
-            Error::GuildNotFound => f.write_str("Guild not found in the cache."),
-            Error::RoleNotFound => f.write_str("Role not found in the cache."),
-            Error::MemberNotFound => f.write_str("Member not found in the cache."),
-            Error::ChannelNotFound => f.write_str("Channel not found in the cache."),
-            Error::Hierarchy => f.write_str("Role hierarchy prevents this action."),
-            Error::InvalidChannelType => f.write_str("The channel cannot perform the action."),
-            Error::InvalidComponentType => f.write_str("The component cannot perform this action."),
-            Error::InvalidPermissions(_) => f.write_str("Invalid permissions."),
-            Error::InvalidUser => f.write_str("The current user cannot perform the action."),
-            Error::ItemMissing => f.write_str("The required item is missing from the cache."),
-            Error::WrongGuild => f.write_str("Provided member or channel is from the wrong guild."),
-            Error::MessageTooLong(_) => f.write_str("Message too large."),
-            Error::MessageAlreadyCrossposted => f.write_str("Message already crossposted."),
-            Error::CannotCrosspostMessage => f.write_str("Cannot crosspost this message type."),
-            Error::MessagingBot => f.write_str("Attempted to message another bot user."),
-            Error::NameTooShort => f.write_str("Name is under the character limit."),
-            Error::NameTooLong => f.write_str("Name is over the character limit."),
-            Error::NotAuthor => f.write_str("The bot is not author of this message."),
-            Error::NoTokenSet => f.write_str("Token is not set."),
+            Self::BulkDeleteAmount => f.write_str("Too few/many messages to bulk delete."),
+            Self::DeleteMessageDaysAmount(_) => f.write_str("Invalid delete message days."),
+            Self::EmbedAmount => f.write_str("Too many embeds in a message."),
+            Self::EmbedTooLarge(_) => f.write_str("Embed too large."),
+            Self::GuildNotFound => f.write_str("Guild not found in the cache."),
+            Self::RoleNotFound => f.write_str("Role not found in the cache."),
+            Self::MemberNotFound => f.write_str("Member not found in the cache."),
+            Self::ChannelNotFound => f.write_str("Channel not found in the cache."),
+            Self::Hierarchy => f.write_str("Role hierarchy prevents this action."),
+            Self::InvalidChannelType => f.write_str("The channel cannot perform the action."),
+            Self::InvalidPermissions(_) => f.write_str("Invalid permissions."),
+            Self::InvalidUser => f.write_str("The current user cannot perform the action."),
+            Self::ItemMissing => f.write_str("The required item is missing from the cache."),
+            Self::WrongGuild => f.write_str("Provided member or channel is from the wrong guild."),
+            Self::MessageTooLong(_) => f.write_str("Message too large."),
+            Self::MessageAlreadyCrossposted => f.write_str("Message already crossposted."),
+            Self::CannotCrosspostMessage => f.write_str("Cannot crosspost this message type."),
+            Self::MessagingBot => f.write_str("Attempted to message another bot user."),
+            Self::NameTooShort => f.write_str("Name is under the character limit."),
+            Self::NameTooLong => f.write_str("Name is over the character limit."),
+            Self::NotAuthor => f.write_str("The bot is not author of this message."),
+            Self::NoTokenSet => f.write_str("Token is not set."),
+            Self::DeleteNitroSticker => f.write_str("Cannot delete an official sticker."),
+            Self::NoStickerFileSet => f.write_str("Sticker file is not set."),
+            Self::StickerAmount => f.write_str("Too many stickers in a message."),
         }
     }
 }

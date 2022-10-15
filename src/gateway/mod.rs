@@ -1,5 +1,5 @@
 //! The gateway module contains the pieces - primarily the `Shard` -
-//! responsible for maintaing a WebSocket connection with Discord.
+//! responsible for maintaining a WebSocket connection with Discord.
 //!
 //! A shard is an interface for the lower-level receiver and sender. It provides
 //! what can otherwise be thought of as "sugar methods". A shard represents a
@@ -50,22 +50,21 @@ mod error;
 mod shard;
 mod ws_client_ext;
 
-use std::fmt::{Display, Formatter, Result as FmtResult};
+use std::fmt;
 
-use serde_json::Value;
-
-pub use self::{
-    error::Error as GatewayError,
-    shard::Shard,
-    ws_client_ext::WebSocketGatewayClientExt,
-};
+pub use self::error::Error as GatewayError;
+pub use self::shard::Shard;
+pub use self::ws_client_ext::WebSocketGatewayClientExt;
 #[cfg(feature = "client")]
 use crate::client::bridge::gateway::ShardClientMessage;
-use crate::model::{gateway::Activity, user::OnlineStatus};
+use crate::json::Value;
+use crate::model::gateway::Activity;
+use crate::model::user::OnlineStatus;
 
 pub type CurrentPresence = (Option<Activity>, OnlineStatus);
 
-use async_tungstenite::{tokio::ConnectStream, WebSocketStream};
+use async_tungstenite::tokio::ConnectStream;
+use async_tungstenite::WebSocketStream;
 
 pub type WsStream = WebSocketStream<ConnectStream>;
 
@@ -123,27 +122,22 @@ impl ConnectionStage {
     ///
     /// assert!(!ConnectionStage::Connected.is_connecting());
     /// ```
+    #[must_use]
     pub fn is_connecting(self) -> bool {
-        use self::ConnectionStage::*;
-
-        match self {
-            Connecting | Handshake | Identifying | Resuming => true,
-            Connected | Disconnected => false,
-        }
+        use self::ConnectionStage::{Connecting, Handshake, Identifying, Resuming};
+        matches!(self, Connecting | Handshake | Identifying | Resuming)
     }
 }
 
-impl Display for ConnectionStage {
-    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        use self::ConnectionStage::*;
-
+impl fmt::Display for ConnectionStage {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match *self {
-            Connected => "connected",
-            Connecting => "connecting",
-            Disconnected => "disconnected",
-            Handshake => "handshaking",
-            Identifying => "identifying",
-            Resuming => "resuming",
+            Self::Connected => "connected",
+            Self::Connecting => "connecting",
+            Self::Disconnected => "disconnected",
+            Self::Handshake => "handshaking",
+            Self::Identifying => "identifying",
+            Self::Resuming => "resuming",
         })
     }
 }

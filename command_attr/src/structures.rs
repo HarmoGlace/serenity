@@ -1,13 +1,12 @@
 use std::str::FromStr;
 
-use proc_macro2::Span;
-use proc_macro2::TokenStream as TokenStream2;
+use proc_macro2::{Span, TokenStream as TokenStream2};
 use quote::{quote, ToTokens};
+use syn::parse::{Error, Parse, ParseStream, Result};
+use syn::punctuated::Punctuated;
+use syn::spanned::Spanned;
 use syn::{
     braced,
-    parse::{Error, Parse, ParseStream, Result},
-    punctuated::Punctuated,
-    spanned::Spanned,
     Attribute,
     Block,
     Expr,
@@ -25,7 +24,7 @@ use syn::{
 use crate::consts::CHECK;
 use crate::util::{self, Argument, AsOption, IdentExt2, Parenthesised};
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub enum OnlyIn {
     Dm,
     Guild,
@@ -47,9 +46,9 @@ impl ToTokens for OnlyIn {
     fn to_tokens(&self, stream: &mut TokenStream2) {
         let only_in_path = quote!(serenity::framework::standard::OnlyIn);
         match self {
-            OnlyIn::Dm => stream.extend(quote!(#only_in_path::Dm)),
-            OnlyIn::Guild => stream.extend(quote!(#only_in_path::Guild)),
-            OnlyIn::None => stream.extend(quote!(#only_in_path::None)),
+            Self::Dm => stream.extend(quote!(#only_in_path::Dm)),
+            Self::Guild => stream.extend(quote!(#only_in_path::Guild)),
+            Self::None => stream.extend(quote!(#only_in_path::None)),
         }
     }
 }
@@ -211,11 +210,7 @@ impl ToTokens for CommandFun {
 
 #[derive(Debug)]
 pub struct FunctionHook {
-    /// `#[...]`-style attributes.
     pub attributes: Vec<Attribute>,
-    /// Populated by cooked attributes. These are attributes outside of the realm of this crate's procedural macros
-    /// and will appear in generated output.
-    pub cooked: Vec<Attribute>,
     pub visibility: Visibility,
     pub name: Ident,
     pub args: Vec<Argument>,
@@ -225,11 +220,7 @@ pub struct FunctionHook {
 
 #[derive(Debug)]
 pub struct ClosureHook {
-    /// `#[...]`-style attributes.
     pub attributes: Vec<Attribute>,
-    /// Populated by cooked attributes. These are attributes outside of the realm of this crate's procedural macros
-    /// and will appear in generated output.
-    pub cooked: Vec<Attribute>,
     pub args: Punctuated<Pat, Token![,]>,
     pub ret: ReturnType,
     pub body: Box<Expr>,
@@ -237,19 +228,18 @@ pub struct ClosureHook {
 
 #[derive(Debug)]
 pub enum Hook {
-    Function(FunctionHook),
+    Function(Box<FunctionHook>),
     Closure(ClosureHook),
 }
 
 impl Parse for Hook {
     fn parse(input: ParseStream<'_>) -> Result<Self> {
-        let mut attributes = input.call(Attribute::parse_outer)?;
-        let cooked = remove_cooked(&mut attributes);
+        let attributes = input.call(Attribute::parse_outer)?;
 
         if is_function(input) {
-            parse_function_hook(input, attributes, cooked).map(Self::Function)
+            parse_function_hook(input, attributes).map(|h| Self::Function(Box::new(h)))
         } else {
-            parse_closure_hook(input, attributes, cooked).map(Self::Closure)
+            parse_closure_hook(input, attributes).map(Self::Closure)
         }
     }
 }
@@ -258,11 +248,7 @@ fn is_function(input: ParseStream<'_>) -> bool {
     input.peek(Token![pub]) || (input.peek(Token![async]) && input.peek2(Token![fn]))
 }
 
-fn parse_function_hook(
-    input: ParseStream<'_>,
-    attributes: Vec<Attribute>,
-    cooked: Vec<Attribute>,
-) -> Result<FunctionHook> {
+fn parse_function_hook(input: ParseStream<'_>, attributes: Vec<Attribute>) -> Result<FunctionHook> {
     let visibility = input.parse::<Visibility>()?;
 
     input.parse::<Token![async]>()?;
@@ -289,7 +275,6 @@ fn parse_function_hook(
 
     Ok(FunctionHook {
         attributes,
-        cooked,
         visibility,
         name,
         args,
@@ -298,17 +283,12 @@ fn parse_function_hook(
     })
 }
 
-fn parse_closure_hook(
-    input: ParseStream<'_>,
-    attributes: Vec<Attribute>,
-    cooked: Vec<Attribute>,
-) -> Result<ClosureHook> {
+fn parse_closure_hook(input: ParseStream<'_>, attributes: Vec<Attribute>) -> Result<ClosureHook> {
     input.parse::<Token![async]>()?;
     let closure = input.parse::<ExprClosure>()?;
 
     Ok(ClosureHook {
         attributes,
-        cooked,
         args: closure.inputs,
         ret: closure.output,
         body: closure.body,
@@ -352,7 +332,7 @@ impl Permissions {
             "MANAGE_NICKNAMES" => 0b0000_1000_0000_0000_0000_0000_0000_0000,
             "MANAGE_ROLES" => 0b0001_0000_0000_0000_0000_0000_0000_0000,
             "MANAGE_WEBHOOKS" => 0b0010_0000_0000_0000_0000_0000_0000_0000,
-            "MANAGE_EMOJIS" => 0b0100_0000_0000_0000_0000_0000_0000_0000,
+            "MANAGE_EMOJIS_AND_STICKERS" => 0b0100_0000_0000_0000_0000_0000_0000_0000,
             _ => return None,
         }))
     }
@@ -362,15 +342,15 @@ impl ToTokens for Permissions {
     fn to_tokens(&self, stream: &mut TokenStream2) {
         let bits = self.0;
 
-        let path = quote!(serenity::model::permissions::Permissions);
+        let path = quote!(serenity::model::permissions::Permissions::from_bits_truncate);
 
         stream.extend(quote! {
-            #path { bits: #bits }
+            #path(#bits)
         });
     }
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq)]
+#[derive(Debug, Default, Clone, Copy)]
 pub struct Colour(pub u32);
 
 impl Colour {
@@ -471,7 +451,7 @@ impl Options {
     }
 }
 
-#[derive(PartialEq, Debug)]
+#[derive(Debug)]
 pub enum HelpBehaviour {
     Strike,
     Hide,
@@ -493,14 +473,14 @@ impl ToTokens for HelpBehaviour {
     fn to_tokens(&self, stream: &mut TokenStream2) {
         let help_behaviour_path = quote!(serenity::framework::standard::HelpBehaviour);
         match self {
-            HelpBehaviour::Strike => stream.extend(quote!(#help_behaviour_path::Strike)),
-            HelpBehaviour::Hide => stream.extend(quote!(#help_behaviour_path::Hide)),
-            HelpBehaviour::Nothing => stream.extend(quote!(#help_behaviour_path::Nothing)),
+            Self::Strike => stream.extend(quote!(#help_behaviour_path::Strike)),
+            Self::Hide => stream.extend(quote!(#help_behaviour_path::Hide)),
+            Self::Nothing => stream.extend(quote!(#help_behaviour_path::Nothing)),
         }
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub struct HelpOptions {
     pub suggestion_text: String,
     pub no_help_available_text: String,

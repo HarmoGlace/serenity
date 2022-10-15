@@ -1,34 +1,27 @@
-use std::{
-    boxed::Box,
-    future::Future,
-    pin::Pin,
-    sync::Arc,
-    task::{Context as FutContext, Poll},
-    time::Duration,
-};
+use std::fmt;
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::Arc;
+use std::task::{Context as FutContext, Poll};
+use std::time::Duration;
 
-use futures::{
-    future::BoxFuture,
-    stream::{Stream, StreamExt},
-};
+use futures::future::BoxFuture;
+use futures::stream::{Stream, StreamExt};
 use tokio::sync::mpsc::{
     unbounded_channel,
     UnboundedReceiver as Receiver,
     UnboundedSender as Sender,
 };
-#[cfg(all(feature = "tokio_compat", not(feature = "tokio")))]
-use tokio::time::{delay_for as sleep, Delay as Sleep};
-#[cfg(feature = "tokio")]
 use tokio::time::{sleep, Sleep};
 
 use crate::client::bridge::gateway::ShardMessenger;
 use crate::collector::LazyArc;
-use crate::model::interactions::message_component::MessageComponentInteraction;
+use crate::model::application::interaction::message_component::MessageComponentInteraction;
 
 macro_rules! impl_component_interaction_collector {
     ($($name:ident;)*) => {
         $(
-            impl<'a> $name<'a> {
+            impl $name {
                 /// Limits how many interactions will attempt to be filtered.
                 ///
                 /// The filter checks whether the message has been sent
@@ -149,7 +142,7 @@ impl ComponentInteractionFilter {
 
     /// Checks if the `interaction` passes set constraints.
     /// Constraints are optional, as it is possible to limit interactions to
-    /// be sent by a specific author or in a specifc guild.
+    /// be sent by a specific author or in a specific guild.
     fn is_passing_constraints(
         &self,
         interaction: &mut LazyArc<'_, MessageComponentInteraction>,
@@ -171,40 +164,26 @@ impl ComponentInteractionFilter {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 struct FilterOptions {
     filter_limit: Option<u32>,
     collect_limit: Option<u32>,
-    filter: Option<Arc<dyn Fn(&Arc<MessageComponentInteraction>) -> bool + 'static + Send + Sync>>,
+    filter: Option<super::FilterFn<MessageComponentInteraction>>,
     channel_id: Option<u64>,
     guild_id: Option<u64>,
     author_id: Option<u64>,
     message_id: Option<u64>,
 }
 
-impl std::fmt::Debug for FilterOptions {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Debug for FilterOptions {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ComponentInteractionFilter")
             .field("collect_limit", &self.collect_limit)
-            .field("filter", &"Option<Arc<dyn Fn(&Arc<Reaction>) -> bool + 'static + Send + Sync>>")
+            .field("filter", &"Option<super::FilterFn<Reaction>>")
             .field("channel_id", &self.channel_id)
             .field("guild_id", &self.guild_id)
             .field("author_id", &self.author_id)
             .finish()
-    }
-}
-
-impl Default for FilterOptions {
-    fn default() -> Self {
-        Self {
-            filter_limit: None,
-            collect_limit: None,
-            filter: None,
-            channel_id: None,
-            guild_id: None,
-            author_id: None,
-            message_id: None,
-        }
     }
 }
 
@@ -216,55 +195,48 @@ impl_component_interaction_collector! {
     ComponentInteractionCollectorBuilder;
 }
 
-pub struct ComponentInteractionCollectorBuilder<'a> {
+#[must_use = "Builders do nothing unless built"]
+pub struct ComponentInteractionCollectorBuilder {
     filter: Option<FilterOptions>,
     shard: Option<ShardMessenger>,
     timeout: Option<Pin<Box<Sleep>>>,
-    fut: Option<BoxFuture<'a, ComponentInteractionCollector>>,
 }
 
-impl<'a> ComponentInteractionCollectorBuilder<'a> {
+impl ComponentInteractionCollectorBuilder {
     pub fn new(shard_messenger: impl AsRef<ShardMessenger>) -> Self {
         Self {
             filter: Some(FilterOptions::default()),
             shard: Some(shard_messenger.as_ref().clone()),
             timeout: None,
-            fut: None,
         }
     }
-}
 
-impl<'a> Future for ComponentInteractionCollectorBuilder<'a> {
-    type Output = ComponentInteractionCollector;
+    /// Use the given configuration to build the [`ComponentInteractionCollector`].
     #[allow(clippy::unwrap_used)]
-    fn poll(mut self: Pin<&mut Self>, ctx: &mut FutContext<'_>) -> Poll<Self::Output> {
-        if self.fut.is_none() {
-            let shard_messenger = self.shard.take().unwrap();
-            let (filter, receiver) = ComponentInteractionFilter::new(self.filter.take().unwrap());
-            let timeout = self.timeout.take();
+    #[must_use]
+    pub fn build(self) -> ComponentInteractionCollector {
+        let shard_messenger = self.shard.unwrap();
+        let (filter, receiver) = ComponentInteractionFilter::new(self.filter.unwrap());
+        let timeout = self.timeout;
 
-            self.fut = Some(Box::pin(async move {
-                shard_messenger.set_component_interaction_filter(filter);
+        shard_messenger.set_component_interaction_filter(filter);
 
-                ComponentInteractionCollector {
-                    receiver: Box::pin(receiver),
-                    timeout,
-                }
-            }))
+        ComponentInteractionCollector {
+            receiver: Box::pin(receiver),
+            timeout,
         }
-
-        self.fut.as_mut().unwrap().as_mut().poll(ctx)
     }
 }
 
-pub struct CollectComponentInteraction<'a> {
+#[must_use = "Builders do nothing unless awaited"]
+pub struct CollectComponentInteraction {
     filter: Option<FilterOptions>,
     shard: Option<ShardMessenger>,
     timeout: Option<Pin<Box<Sleep>>>,
-    fut: Option<BoxFuture<'a, Option<Arc<MessageComponentInteraction>>>>,
+    fut: Option<BoxFuture<'static, Option<Arc<MessageComponentInteraction>>>>,
 }
 
-impl<'a> CollectComponentInteraction<'a> {
+impl CollectComponentInteraction {
     pub fn new(shard_messenger: impl AsRef<ShardMessenger>) -> Self {
         Self {
             filter: Some(FilterOptions::default()),
@@ -275,7 +247,7 @@ impl<'a> CollectComponentInteraction<'a> {
     }
 }
 
-impl<'a> Future for CollectComponentInteraction<'a> {
+impl Future for CollectComponentInteraction {
     type Output = Option<Arc<MessageComponentInteraction>>;
     #[allow(clippy::unwrap_used)]
     fn poll(mut self: Pin<&mut Self>, ctx: &mut FutContext<'_>) -> Poll<Self::Output> {
@@ -293,7 +265,7 @@ impl<'a> Future for CollectComponentInteraction<'a> {
                 }
                 .next()
                 .await
-            }))
+            }));
         }
 
         self.fut.as_mut().unwrap().as_mut().poll(ctx)

@@ -1,26 +1,17 @@
 //! In this example, you will be shown various ways of sharing data between events and commands.
 //! And how to use locks correctly to avoid deadlocking the bot.
 
-use std::{
-    collections::HashMap,
-    env,
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc,
-    },
-};
+use std::collections::HashMap;
+use std::env;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
-use serenity::{
-    async_trait,
-    framework::standard::{
-        macros::{command, group, hook},
-        Args,
-        CommandResult,
-        StandardFramework,
-    },
-    model::{channel::Message, gateway::Ready},
-    prelude::*,
-};
+use serenity::async_trait;
+use serenity::framework::standard::macros::{command, group, hook};
+use serenity::framework::standard::{Args, CommandResult, StandardFramework};
+use serenity::model::channel::Message;
+use serenity::model::gateway::Ready;
+use serenity::prelude::*;
 use tokio::sync::RwLock;
 
 // A container type is created for inserting into the Client's `data`, which
@@ -63,7 +54,7 @@ async fn before(ctx: &Context, msg: &Message, command_name: &str) -> bool {
 
         // Since the CommandCounter Value is wrapped in an Arc, cloning will not duplicate the
         // data, instead the reference is cloned.
-        // We wap every value on in an Arc, as to keep the data lock open for the least time possible,
+        // We wrap every value on in an Arc, as to keep the data lock open for the least time possible,
         // to again, avoid deadlocking it.
         data_read.get::<CommandCounter>().expect("Expected CommandCounter in TypeMap.").clone()
     };
@@ -88,17 +79,23 @@ struct Handler;
 #[async_trait]
 impl EventHandler for Handler {
     async fn message(&self, ctx: Context, msg: Message) {
-        if msg.content.to_lowercase().contains("owo") {
+        // We are verifying if the bot id is the same as the message author id.
+        if msg.author.id != ctx.cache.current_user_id()
+            && msg.content.to_lowercase().contains("owo")
+        {
             // Since data is located in Context, this means you are also able to use it within events!
             let count = {
                 let data_read = ctx.data.read().await;
                 data_read.get::<MessageCount>().expect("Expected MessageCount in TypeMap.").clone()
             };
 
+            // Here, we are checking how many "owo" there are in the message content.
+            let owo_in_msg = msg.content.to_ascii_lowercase().matches("owo").count();
+
             // Atomic operations with ordering do not require mut to be modified.
             // In this case, we want to increase the message count by 1.
             // https://doc.rust-lang.org/std/sync/atomic/struct.AtomicUsize.html#method.fetch_add
-            count.fetch_add(1, Ordering::SeqCst);
+            count.fetch_add(owo_in_msg, Ordering::SeqCst);
         }
     }
 
@@ -116,7 +113,10 @@ async fn main() {
         .before(before)
         .group(&GENERAL_GROUP);
 
-    let mut client = Client::builder(&token)
+    let intents = GatewayIntents::GUILD_MESSAGES
+        | GatewayIntents::DIRECT_MESSAGES
+        | GatewayIntents::MESSAGE_CONTENT;
+    let mut client = Client::builder(&token, intents)
         .event_handler(Handler)
         .framework(framework)
         .await
@@ -134,8 +134,11 @@ async fn main() {
     // https://doc.rust-lang.org/book/ch16-03-shared-state.html
     //
     // All of this means that we have to keep locks open for the least time possible, so we put
-    // them inside a block, so they get closed automatically when droped.
+    // them inside a block, so they get closed automatically when dropped.
     // If we don't do this, we would never be able to open the data lock anywhere else.
+    //
+    // Alternatively, you can also use `ClientBuilder::type_map_insert` or
+    // `ClientBuilder::type_map` to populate the global TypeMap without dealing with the RwLock.
     {
         // Open the data lock in write mode, so keys can be inserted to it.
         let mut data = client.data.write().await;

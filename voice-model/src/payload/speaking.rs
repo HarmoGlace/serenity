@@ -1,5 +1,7 @@
-use crate::{id::UserId, speaking_state::SpeakingState};
 use serde::{Deserialize, Serialize};
+
+use crate::id::UserId;
+use crate::speaking_state::SpeakingState;
 
 /// Used to indicate which users are speaking, or to inform Discord that the client is now speaking.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
@@ -14,6 +16,6 @@ pub struct Speaking {
     pub ssrc: u32,
     /// User ID of the speaker, included in messages *received from* the server.
     ///
-    /// Used alognside the SSRC to map individual packets to their sender.
+    /// Used alongside the SSRC to map individual packets to their sender.
     pub user_id: Option<UserId>,
 }

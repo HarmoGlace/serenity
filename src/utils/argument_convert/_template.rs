@@ -1,3 +1,4 @@
+use std::fmt;
 use super::ArgumentConvert;
 use crate::{model::prelude::*, prelude::*};
 
@@ -9,8 +10,8 @@ pub enum PLACEHOLDERParseError {
 
 impl std::error::Error for PLACEHOLDERParseError {}
 
-impl std::fmt::Display for PLACEHOLDERParseError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for PLACEHOLDERParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
         }
     }
@@ -23,7 +24,6 @@ impl std::fmt::Display for PLACEHOLDERParseError {
 /// The lookup strategy is as follows (in order):
 /// 1. Lookup by PLACEHOLDER
 /// 2. [Lookup by PLACEHOLDER](`crate::utils::parse_PLACEHOLDER`).
-#[cfg(feature = "cache")]
 #[async_trait::async_trait]
 impl ArgumentConvert for PLACEHOLDER {
     type Err = PLACEHOLDERParseError;

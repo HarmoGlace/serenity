@@ -14,31 +14,17 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v2
 
-      - name: Install stable toolchain
-        id: toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: nightly
-          components: clippy
-          profile: minimal
-          override: true
+      - name: Install toolchain
+        run: rustup install stable
 
-      - name: Setup cache
-        uses: actions/cache@v2
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-clippy-rustc-${{ steps.toolchain.outputs.rustc_hash }}-${{ hashFiles('**/Cargo.lock') }}
+      - name: Add problem matchers
+        run: echo "::add-matcher::.github/matchers/rust.json"
+
+      - name: Cache
+        uses: Swatinem/rust-cache@v1
 
       - name: Run clippy
-        uses: actions-rs/clippy-check@v1
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          # TODO(https://github.com/serenity-rs/serenity/issues/1423): Clippy currently fails with
-          # all features enabled. Re-add `--workspace` here once that's fixed.
-          args: --tests
+        run: cargo clippy --workspace --tests -- -D warnings
 
   rustfmt:
     name: Format
@@ -48,13 +34,14 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v2
 
-      - name: Install stable toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: nightly
-          components: rustfmt
-          profile: minimal
-          override: true
+      - name: Install toolchain
+        run: |
+          rustup install --profile minimal nightly
+          rustup override set nightly
+          rustup component add rustfmt
+
+      - name: Add problem matchers
+        run: echo "::add-matcher::.github/matchers/rust.json"
 
       - name: Run cargo fmt
         run: cargo fmt --all -- --check

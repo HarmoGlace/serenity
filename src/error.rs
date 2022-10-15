@@ -1,9 +1,6 @@
-use std::{
-    error::Error as StdError,
-    fmt::{self, Display, Error as FormatError},
-    io::Error as IoError,
-    num::ParseIntError,
-};
+use std::error::Error as StdError;
+use std::fmt::{self, Error as FormatError};
+use std::io::Error as IoError;
 
 #[cfg(feature = "gateway")]
 use async_tungstenite::tungstenite::error::Error as TungsteniteError;
@@ -21,12 +18,6 @@ use crate::gateway::GatewayError;
 #[cfg(feature = "http")]
 use crate::http::HttpError;
 use crate::internal::prelude::*;
-#[cfg(all(
-    feature = "gateway",
-    feature = "rustls_backend_marker",
-    not(feature = "native_tls_backend_marker")
-))]
-use crate::internal::ws_impl::RustlsError;
 use crate::model::ModelError;
 
 /// The common result type between most library functions.
@@ -54,12 +45,13 @@ pub enum Error {
     Io(IoError),
     /// An error from the [`serde_json`] crate.
     Json(JsonError),
+    #[cfg(feature = "simd-json")]
+    /// An error from the `simd_json` crate.
+    SimdJson(simd_json::Error),
     /// An error from the [`model`] module.
     ///
     /// [`model`]: crate::model
     Model(ModelError),
-    /// An error occurred while parsing an integer.
-    Num(ParseIntError),
     /// Input exceeded a limit.
     /// Providing the input and the limit that's not supposed to be exceeded.
     ///
@@ -104,16 +96,16 @@ pub enum Error {
     /// [`http`]: crate::http
     #[cfg(feature = "http")]
     Http(Box<HttpError>),
-    /// An error occuring in rustls
-    #[cfg(all(
-        feature = "gateway",
-        feature = "rustls_backend_marker",
-        not(feature = "native_tls_backend_marker")
-    ))]
-    Rustls(RustlsError),
     /// An error from the `tungstenite` crate.
     #[cfg(feature = "gateway")]
     Tungstenite(TungsteniteError),
+}
+
+#[cfg(feature = "simd-json")]
+impl From<simd_json::Error> for Error {
+    fn from(e: simd_json::Error) -> Self {
+        Error::SimdJson(e)
+    }
 }
 
 impl From<FormatError> for Error {
@@ -141,26 +133,9 @@ impl From<JsonError> for Error {
     }
 }
 
-impl From<ParseIntError> for Error {
-    fn from(e: ParseIntError) -> Error {
-        Error::Num(e)
-    }
-}
-
 impl From<ModelError> for Error {
     fn from(e: ModelError) -> Error {
         Error::Model(e)
-    }
-}
-
-#[cfg(all(
-    feature = "gateway",
-    feature = "rustls_backend_marker",
-    not(feature = "native_tls_backend_marker")
-))]
-impl From<RustlsError> for Error {
-    fn from(e: RustlsError) -> Error {
-        Error::Rustls(e)
     }
 }
 
@@ -192,30 +167,29 @@ impl From<ReqwestError> for Error {
     }
 }
 
-impl Display for Error {
+impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Error::Decode(msg, _) | Error::Other(msg) => f.write_str(msg),
-            Error::ExceededLimit(..) => f.write_str("Input exceeded a limit"),
-            Error::NotInRange(..) => f.write_str("Input is not in the specified range"),
-            Error::Format(inner) => fmt::Display::fmt(&inner, f),
-            Error::Io(inner) => fmt::Display::fmt(&inner, f),
-            Error::Json(inner) => fmt::Display::fmt(&inner, f),
-            Error::Model(inner) => fmt::Display::fmt(&inner, f),
-            Error::Num(inner) => fmt::Display::fmt(&inner, f),
-            Error::Url(msg) => f.write_str(msg),
+            Self::Decode(msg, _) | Self::Other(msg) => f.write_str(msg),
+            Self::ExceededLimit(..) => f.write_str("Input exceeded a limit"),
+            Self::NotInRange(..) => f.write_str("Input is not in the specified range"),
+            Self::Format(inner) => fmt::Display::fmt(&inner, f),
+            Self::Io(inner) => fmt::Display::fmt(&inner, f),
+            Self::Json(inner) => fmt::Display::fmt(&inner, f),
+            Self::Model(inner) => fmt::Display::fmt(&inner, f),
+            Self::Url(msg) => f.write_str(msg),
+            #[cfg(feature = "simd-json")]
+            Error::SimdJson(inner) => fmt::Display::fmt(&inner, f),
             #[cfg(feature = "client")]
-            Error::Client(inner) => fmt::Display::fmt(&inner, f),
+            Self::Client(inner) => fmt::Display::fmt(&inner, f),
             #[cfg(feature = "collector")]
-            Error::Collector(inner) => fmt::Display::fmt(&inner, f),
+            Self::Collector(inner) => fmt::Display::fmt(&inner, f),
             #[cfg(feature = "gateway")]
-            Error::Gateway(inner) => fmt::Display::fmt(&inner, f),
+            Self::Gateway(inner) => fmt::Display::fmt(&inner, f),
             #[cfg(feature = "http")]
-            Error::Http(inner) => fmt::Display::fmt(&inner, f),
-            #[cfg(all(feature = "gateway", not(feature = "native_tls_backend_marker")))]
-            Error::Rustls(inner) => fmt::Display::fmt(&inner, f),
+            Self::Http(inner) => fmt::Display::fmt(&inner, f),
             #[cfg(feature = "gateway")]
-            Error::Tungstenite(inner) => fmt::Display::fmt(&inner, f),
+            Self::Tungstenite(inner) => fmt::Display::fmt(&inner, f),
         }
     }
 }
@@ -224,27 +198,20 @@ impl StdError for Error {
     #[instrument]
     fn source(&self) -> Option<&(dyn StdError + 'static)> {
         match self {
-            Error::Format(inner) => Some(inner),
-            Error::Io(inner) => Some(inner),
-            Error::Json(inner) => Some(inner),
-            Error::Model(inner) => Some(inner),
-            Error::Num(inner) => Some(inner),
+            Self::Format(inner) => Some(inner),
+            Self::Io(inner) => Some(inner),
+            Self::Json(inner) => Some(inner),
+            Self::Model(inner) => Some(inner),
             #[cfg(feature = "client")]
-            Error::Client(inner) => Some(inner),
+            Self::Client(inner) => Some(inner),
             #[cfg(feature = "collector")]
-            Error::Collector(inner) => Some(inner),
+            Self::Collector(inner) => Some(inner),
             #[cfg(feature = "gateway")]
-            Error::Gateway(inner) => Some(inner),
+            Self::Gateway(inner) => Some(inner),
             #[cfg(feature = "http")]
-            Error::Http(inner) => Some(inner),
-            #[cfg(all(
-                feature = "gateway",
-                feature = "rustls_backend_marker",
-                not(feature = "native_tls_backend_marker")
-            ))]
-            Error::Rustls(inner) => Some(inner),
+            Self::Http(inner) => Some(inner),
             #[cfg(feature = "gateway")]
-            Error::Tungstenite(inner) => Some(inner),
+            Self::Tungstenite(inner) => Some(inner),
             _ => None,
         }
     }

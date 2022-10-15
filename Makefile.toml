@@ -324,3 +324,60 @@ args = ["make", "run_example", "e15_simple_dashboard"]
 [tasks.dev_build_15]
 command = "cargo"
 args = ["make", "build_example", "e15_simple_dashboard"]
+
+[tasks.16]
+alias = "run_16"
+
+[tasks.run_16]
+command = "cargo"
+args = ["make", "run_example_release", "e16_sqlite_database"]
+
+[tasks.build_16]
+command = "cargo"
+args = ["make", "build_example_release", "e16_sqlite_database"]
+
+[tasks.dev_run_16]
+command = "cargo"
+args = ["make", "run_example", "e16_sqlite_database"]
+
+[tasks.dev_build_16]
+command = "cargo"
+args = ["make", "build_example", "e16_sqlite_database"]
+
+[tasks.17]
+alias = "run_17"
+
+[tasks.run_17]
+command = "cargo"
+args = ["make", "run_example_release", "e17_message_components"]
+
+[tasks.build_17]
+command = "cargo"
+args = ["make", "build_example_release", "e17_message_components"]
+
+[tasks.dev_run_17]
+command = "cargo"
+args = ["make", "run_example", "e17_message_components"]
+
+[tasks.dev_build_17]
+command = "cargo"
+args = ["make", "build_example", "e17_message_components"]
+
+[tasks.18]
+alias = "run_18"
+
+[tasks.run_18]
+command = "cargo"
+args = ["make", "run_example_release", "e18_webhook"]
+
+[tasks.build_18]
+command = "cargo"
+args = ["make", "build_example_release", "e18_webhook"]
+
+[tasks.dev_run_18]
+command = "cargo"
+args = ["make", "run_example", "e18_webhook"]
+
+[tasks.dev_build_18]
+command = "cargo"
+args = ["make", "build_example", "e18_webhook"]

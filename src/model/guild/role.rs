@@ -1,9 +1,7 @@
 use std::cmp::Ordering;
-
 #[cfg(all(feature = "cache", feature = "model", feature = "utils"))]
-use async_trait::async_trait;
-#[cfg(feature = "model")]
-use serde::de::{Deserialize, Deserializer, Error as DeError};
+use std::error::Error as StdError;
+use std::fmt;
 
 #[cfg(feature = "model")]
 use crate::builder::EditRole;
@@ -15,9 +13,8 @@ use crate::cache::FromStrAndCache;
 use crate::http::Http;
 #[cfg(all(feature = "cache", feature = "model"))]
 use crate::internal::prelude::*;
-#[cfg(all(feature = "cache", feature = "model", feature = "utils"))]
-use crate::model::misc::RoleParseError;
 use crate::model::prelude::*;
+use crate::model::utils::is_false;
 #[cfg(all(feature = "cache", feature = "model", feature = "utils"))]
 use crate::utils::parse_role;
 
@@ -27,6 +24,8 @@ use crate::utils::parse_role;
 /// are unique per guild and do not cross over to other guilds in any way, and
 /// can have channel-specific permission overrides in addition to guild-level
 /// permissions.
+///
+/// [Discord docs](https://discord.com/developers/docs/topics/permissions#role-object).
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct Role {
@@ -76,6 +75,57 @@ pub struct Role {
     /// [`Integration`]: super::Integration
     #[serde(default)]
     pub tags: RoleTags,
+    /// Role icon image hash.
+    ///
+    /// `role-icons/<role_id>/<hash>.png` - PNG, JPEG, WEBP
+    /// `role-icons/<role_id>/a_<hash>.gif` - GIF, Animated WEBP
+    pub icon: Option<String>,
+    /// Role unicoded image.
+    pub unicode_emoji: Option<String>,
+}
+
+/// Helper for deserialization without a `GuildId` but then later updated to the correct `GuildId`.
+///
+/// The only difference to `Role` is `#[serde(default)]` on `guild_id`.
+#[derive(Deserialize)]
+pub(crate) struct InterimRole {
+    pub id: RoleId,
+    #[serde(default)]
+    pub guild_id: GuildId,
+    #[cfg(feature = "utils")]
+    #[serde(rename = "color")]
+    pub colour: Colour,
+    #[cfg(not(feature = "utils"))]
+    #[serde(rename = "color")]
+    pub colour: u32,
+    pub hoist: bool,
+    pub managed: bool,
+    #[serde(default)]
+    pub mentionable: bool,
+    pub name: String,
+    pub permissions: Permissions,
+    pub position: i64,
+    #[serde(default)]
+    pub tags: RoleTags,
+}
+
+impl From<InterimRole> for Role {
+    fn from(r: InterimRole) -> Self {
+        Self {
+            id: r.id,
+            guild_id: r.guild_id,
+            colour: r.colour,
+            hoist: r.hoist,
+            managed: r.managed,
+            mentionable: r.mentionable,
+            name: r.name,
+            permissions: r.permissions,
+            position: r.position,
+            tags: r.tags,
+            icon: None,
+            unicode_emoji: None,
+        }
+    }
 }
 
 #[cfg(feature = "model")]
@@ -86,7 +136,7 @@ impl Role {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::Http`] if the curent user lacks permission to
+    /// Returns [`Error::Http`] if the current user lacks permission to
     /// delete this role.
     ///
     /// [Manage Roles]: Permissions::MANAGE_ROLES
@@ -107,14 +157,9 @@ impl Role {
     /// # use serenity::model::id::RoleId;
     /// # let role = RoleId(7).to_role_cached(&cache).unwrap();
     /// // assuming a `role` has already been bound
-    //
-    /// role.edit(|mut r| {
-    ///     r.hoist(true);
-    ///
-    ///     r
-    /// });
+    /// role.edit(|r| r.hoist(true));
     /// ```
-    /// 
+    ///
     /// # Errors
     ///
     /// Returns [`Error::Http`] if the current user does not
@@ -132,6 +177,7 @@ impl Role {
 
     /// Check that the role has the given permission.
     #[inline]
+    #[must_use]
     pub fn has_permission(&self, permission: Permissions) -> bool {
         self.permissions.contains(permission)
     }
@@ -142,6 +188,7 @@ impl Role {
     /// precisely equivalent to the given permissions. If you need only check
     /// that the role has at least the given permissions, pass `false`.
     #[inline]
+    #[must_use]
     pub fn has_permissions(&self, permissions: Permissions, precise: bool) -> bool {
         if precise {
             self.permissions == permissions
@@ -151,11 +198,11 @@ impl Role {
     }
 }
 
-impl Display for Role {
+impl fmt::Display for Role {
     /// Format a mention for the role, pinging its members.
     // This is in the format of: `<@&ROLE_ID>`.
-    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        Display::fmt(&self.mention(), f)
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(&self.mention(), f)
     }
 }
 
@@ -187,8 +234,10 @@ impl PartialOrd for Role {
 impl RoleId {
     /// Tries to find the [`Role`] by its Id in the cache.
     #[cfg(feature = "cache")]
-    pub async fn to_role_cached(self, cache: impl AsRef<Cache>) -> Option<Role> {
-        for guild in cache.as_ref().guilds.read().await.values() {
+    pub fn to_role_cached(self, cache: impl AsRef<Cache>) -> Option<Role> {
+        for guild_entry in cache.as_ref().guilds.iter() {
+            let guild = guild_entry.value();
+
             if !guild.roles.contains_key(&self) {
                 continue;
             }
@@ -217,16 +266,35 @@ impl<'a> From<&'a Role> for RoleId {
 }
 
 #[cfg(all(feature = "cache", feature = "model", feature = "utils"))]
-#[async_trait]
+#[derive(Debug)]
+pub enum RoleParseError {
+    NotPresentInCache,
+    InvalidRole,
+}
+
+#[cfg(all(feature = "cache", feature = "model", feature = "utils"))]
+impl fmt::Display for RoleParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NotPresentInCache => f.write_str("not present in cache"),
+            Self::InvalidRole => f.write_str("invalid role"),
+        }
+    }
+}
+
+#[cfg(all(feature = "cache", feature = "model", feature = "utils"))]
+impl StdError for RoleParseError {}
+
+#[cfg(all(feature = "cache", feature = "model", feature = "utils"))]
 impl FromStrAndCache for Role {
     type Err = RoleParseError;
 
-    async fn from_str<CRL>(cache: CRL, s: &str) -> StdResult<Self, Self::Err>
+    fn from_str<CRL>(cache: CRL, s: &str) -> StdResult<Self, Self::Err>
     where
         CRL: AsRef<Cache> + Send + Sync,
     {
         match parse_role(s) {
-            Some(x) => match RoleId(x).to_role_cached(&cache).await {
+            Some(x) => match RoleId(x).to_role_cached(&cache) {
                 Some(role) => Ok(role),
                 None => Err(RoleParseError::NotPresentInCache),
             },
@@ -236,7 +304,10 @@ impl FromStrAndCache for Role {
 }
 
 /// The tags of a [`Role`].
-#[derive(Clone, Debug, Default, Serialize)]
+///
+/// [Discord docs](https://discord.com/developers/docs/topics/permissions#role-object-role-tags-structure).
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[cfg_attr(test, derive(PartialEq, Eq))]
 #[non_exhaustive]
 pub struct RoleTags {
     /// The Id of the bot the [`Role`] belongs to.
@@ -244,40 +315,93 @@ pub struct RoleTags {
     /// The Id of the integration the [`Role`] belongs to.
     pub integration_id: Option<IntegrationId>,
     /// Whether this is the guild's premium subscriber role.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "is_false", with = "premium_subscriber")]
     pub premium_subscriber: bool,
 }
 
-impl<'de> Deserialize<'de> for RoleTags {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> StdResult<Self, D::Error> {
-        let mut map = JsonMap::deserialize(deserializer)?;
+/// A premium subscriber role is reported with the field present and the value `null`.
+mod premium_subscriber {
+    use std::fmt;
 
-        let bot_id = match map.contains_key("bot_id") {
-            true => Some(
-                map.remove("bot_id")
-                    .ok_or_else(|| DeError::custom("expected bot_id"))
-                    .and_then(UserId::deserialize)
-                    .map_err(DeError::custom)?,
-            ),
-            false => None,
+    use serde::de::{Error, Visitor};
+    use serde::{Deserializer, Serializer};
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<bool, D::Error> {
+        deserializer.deserialize_option(NullValueVisitor)
+    }
+
+    #[allow(clippy::trivially_copy_pass_by_ref)]
+    pub fn serialize<S: Serializer>(_: &bool, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_none()
+    }
+
+    struct NullValueVisitor;
+
+    impl<'de> Visitor<'de> for NullValueVisitor {
+        type Value = bool;
+
+        fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str("null value")
+        }
+
+        fn visit_none<E: Error>(self) -> Result<Self::Value, E> {
+            Ok(true)
+        }
+
+        /// Called by the `simd_json` crate
+        fn visit_unit<E: Error>(self) -> Result<Self::Value, E> {
+            Ok(true)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_test::{assert_tokens, Token};
+
+    use super::RoleTags;
+
+    #[test]
+    fn premium_subscriber_role_serde() {
+        let value = RoleTags {
+            bot_id: None,
+            integration_id: None,
+            premium_subscriber: true,
         };
 
-        let integration_id = match map.contains_key("integration_id") {
-            true => Some(
-                map.remove("integration_id")
-                    .ok_or_else(|| DeError::custom("expected integration_id"))
-                    .and_then(IntegrationId::deserialize)
-                    .map_err(DeError::custom)?,
-            ),
-            false => None,
+        assert_tokens(&value, &[
+            Token::Struct {
+                name: "RoleTags",
+                len: 3,
+            },
+            Token::Str("bot_id"),
+            Token::None,
+            Token::Str("integration_id"),
+            Token::None,
+            Token::Str("premium_subscriber"),
+            Token::None,
+            Token::StructEnd,
+        ]);
+    }
+
+    #[test]
+    fn non_premium_subscriber_role_serde() {
+        let value = RoleTags {
+            bot_id: None,
+            integration_id: None,
+            premium_subscriber: false,
         };
 
-        let premium_subscriber = map.contains_key("premium_subscriber");
-
-        Ok(Self {
-            bot_id,
-            integration_id,
-            premium_subscriber,
-        })
+        assert_tokens(&value, &[
+            Token::Struct {
+                name: "RoleTags",
+                len: 2,
+            },
+            Token::Str("bot_id"),
+            Token::None,
+            Token::Str("integration_id"),
+            Token::None,
+            Token::StructEnd,
+        ]);
     }
 }

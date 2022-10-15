@@ -1,23 +1,14 @@
-use std::{
-    collections::{HashMap, VecDeque},
-    sync::Arc,
-};
+use std::collections::{HashMap, VecDeque};
+use std::sync::Arc;
 
-use futures::{
-    channel::mpsc::{UnboundedReceiver as Receiver, UnboundedSender as Sender},
-    StreamExt,
-};
+use futures::channel::mpsc::{UnboundedReceiver as Receiver, UnboundedSender as Sender};
+use futures::StreamExt;
 use tokio::sync::{Mutex, RwLock};
-#[cfg(all(feature = "tokio_compat", not(feature = "tokio")))]
-use tokio::time::delay_for as sleep;
-#[cfg(feature = "tokio")]
-use tokio::time::sleep;
-use tokio::time::{timeout, Duration, Instant};
+use tokio::time::{sleep, timeout, Duration, Instant};
 use tracing::{debug, info, instrument, warn};
 use typemap_rev::TypeMap;
 
 use super::{
-    GatewayIntents,
     ShardClientMessage,
     ShardId,
     ShardManagerMessage,
@@ -32,10 +23,10 @@ use crate::client::bridge::voice::VoiceGatewayManager;
 use crate::client::{EventHandler, RawEventHandler};
 #[cfg(feature = "framework")]
 use crate::framework::Framework;
-use crate::gateway::ConnectionStage;
-use crate::gateway::{InterMessage, Shard};
+use crate::gateway::{ConnectionStage, InterMessage, Shard};
 use crate::internal::prelude::*;
 use crate::internal::tokio::spawn_named;
+use crate::model::gateway::GatewayIntents;
 use crate::CacheAndHttp;
 
 const WAIT_BETWEEN_BOOTS_IN_SECONDS: u64 = 5;
@@ -64,7 +55,7 @@ pub struct ShardQueuer {
     pub raw_event_handler: Option<Arc<dyn RawEventHandler>>,
     /// A copy of the framework
     #[cfg(feature = "framework")]
-    pub framework: Arc<Box<dyn Framework + Send + Sync>>,
+    pub framework: Arc<dyn Framework + Send + Sync>,
     /// The instant that a shard was last started.
     ///
     /// This is used to determine how long to wait between shard IDENTIFYs.
@@ -85,7 +76,7 @@ pub struct ShardQueuer {
     /// A copy of the client's voice manager.
     #[cfg(feature = "voice")]
     pub voice_manager: Option<Arc<dyn VoiceGatewayManager + Send + Sync + 'static>>,
-    /// A copy of the URI to use to connect to the gateway.
+    /// A copy of the URL to use to connect to the gateway.
     pub ws_url: Arc<Mutex<String>>,
     pub cache_and_http: Arc<CacheAndHttp>,
     pub intents: GatewayIntents,
@@ -182,7 +173,7 @@ impl ShardQueuer {
     async fn start(&mut self, shard_id: u64, shard_total: u64) -> Result<()> {
         let shard_info = [shard_id, shard_total];
 
-        let shard = Shard::new(
+        let mut shard = Shard::new(
             Arc::clone(&self.ws_url),
             &self.cache_and_http.http.token,
             shard_info,
@@ -190,10 +181,12 @@ impl ShardQueuer {
         )
         .await?;
 
+        shard.set_http(Arc::clone(&self.cache_and_http.http));
+
         let mut runner = ShardRunner::new(ShardRunnerOptions {
             data: Arc::clone(&self.data),
-            event_handler: self.event_handler.as_ref().map(|eh| Arc::clone(eh)),
-            raw_event_handler: self.raw_event_handler.as_ref().map(|rh| Arc::clone(rh)),
+            event_handler: self.event_handler.as_ref().map(Arc::clone),
+            raw_event_handler: self.raw_event_handler.as_ref().map(Arc::clone),
             #[cfg(feature = "framework")]
             framework: Arc::clone(&self.framework),
             manager_tx: self.manager_tx.clone(),
@@ -210,8 +203,7 @@ impl ShardQueuer {
         };
 
         spawn_named("shard_queuer::stop", async move {
-            #[allow(clippy::let_underscore_must_use)]
-            let _ = runner.run().await;
+            drop(runner.run().await);
             debug!("[ShardRunner {:?}] Stopping", runner.shard.shard_info());
         });
 
@@ -229,7 +221,7 @@ impl ShardQueuer {
                 return;
             }
 
-            runners.keys().cloned().collect::<Vec<_>>()
+            runners.keys().copied().collect::<Vec<_>>()
         };
 
         info!("Shutting down all shards");

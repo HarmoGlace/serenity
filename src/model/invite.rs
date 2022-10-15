@@ -1,9 +1,5 @@
 //! Models for server and channel invites.
 
-use std::ops::Deref;
-
-use chrono::{DateTime, Utc};
-
 use super::prelude::*;
 #[cfg(all(feature = "cache", feature = "model"))]
 use super::{utils as model_utils, Permissions};
@@ -16,11 +12,14 @@ use crate::http::{CacheHttp, Http};
 #[cfg(feature = "model")]
 use crate::internal::prelude::*;
 #[cfg(feature = "model")]
-use crate::utils;
+use crate::json;
+use crate::model::Timestamp;
 
 /// Information about an invite code.
 ///
 /// Information can not be accessed for guilds the current user is banned from.
+///
+/// [Discord docs](https://discord.com/developers/docs/resources/invite#invite-object).
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct Invite {
@@ -45,8 +44,7 @@ pub struct Invite {
     ///
     /// This can be [`None`] for invites created by Discord such as invite-widgets
     /// or vanity invite links.
-    pub inviter: Option<InviteUser>,
-
+    pub inviter: Option<User>,
     /// The type of target for this voice channel invite.
     pub target_type: Option<InviteTargetType>,
     /// The user whose stream to display for this voice channel stream invite.
@@ -58,9 +56,9 @@ pub struct Invite {
     /// Only shows up if `target_type` is `EmmbeddedApplication`.
     pub target_application: Option<ApplicationId>,
 
-    // /// The expiration date of this invite, returned from `Http::get_invite` when
-    // /// `with_expiration` is true.
-    // pub expires_at: Option<DateTime<Utc>>,
+    /// The expiration date of this invite, returned from `Http::get_invite` when
+    /// `with_expiration` is true.
+    pub expires_at: Option<Timestamp>,
     /// The Stage instance data if there is a public Stage instance in the Stage
     /// channel this invite is for.
     pub stage_instance: Option<InviteStageInstance>,
@@ -74,15 +72,14 @@ impl Invite {
     /// See the documentation for the [`CreateInvite`] builder for information
     /// on how to use this and the default values that it provides.
     ///
-    /// Requires the [Create Invite] permission.
+    /// Requires the [Create Instant Invite] permission.
     ///
     /// # Errors
     ///
     /// If the `cache` is enabled, returns a [`ModelError::InvalidPermissions`]
     /// if the current user does not have the required [permission].
     ///
-    /// [`CreateInvite`]: crate::builder::CreateInvite
-    /// [Create Invite]: Permissions::CREATE_INVITE
+    /// [Create Instant Invite]: Permissions::CREATE_INSTANT_INVITE
     /// [permission]: super::permissions
     #[inline]
     pub async fn create<F>(
@@ -102,15 +99,14 @@ impl Invite {
                     cache,
                     channel_id,
                     None,
-                    Permissions::CREATE_INVITE,
-                )
-                .await?;
+                    Permissions::CREATE_INSTANT_INVITE,
+                )?;
             }
         }
 
-        let map = utils::hashmap_to_json_map(f(CreateInvite::default()).0);
+        let map = json::hashmap_to_json_map(f(CreateInvite::default()).0);
 
-        cache_http.http().create_invite(channel_id.0, &map).await
+        cache_http.http().create_invite(channel_id.0, &map, None).await
     }
 
     /// Deletes the invite.
@@ -127,7 +123,6 @@ impl Invite {
     ///
     /// [Manage Guild]: Permissions::MANAGE_GUILD
     /// [permission]: super::permissions
-    /// [`Error::Http`]: crate::error::Error::Http
     pub async fn delete(&self, cache_http: impl CacheHttp) -> Result<Invite> {
         #[cfg(feature = "cache")]
         {
@@ -138,22 +133,38 @@ impl Invite {
                     self.channel.id,
                     guild_id,
                     Permissions::MANAGE_GUILD,
-                )
-                .await?;
+                )?;
             }
         }
 
         cache_http.http().as_ref().delete_invite(&self.code).await
     }
 
-    /// Gets the information about an invite.
+    /// Gets information about an invite.
+    ///
+    /// # Arguments
+    ///
+    /// * `code` - The invite code.
+    /// * `member_counts` - Whether to include information about the current number
+    /// of members in the server that the invite belongs to.
+    /// * `expiration` - Whether to include information about when the invite expires.
+    /// * `event_id` - An optional server event ID to include with the invite.
+    ///
+    /// More information about these arguments can be found on Discord's
+    /// [API documentation](https://discord.com/developers/docs/resources/invite#get-invite).
     ///
     /// # Errors
     ///
     /// May return an [`Error::Http`] if the invite is invalid.
     /// Can also return an [`Error::Json`] if there is an error
     /// deserializing the API response.
-    pub async fn get(http: impl AsRef<Http>, code: &str, stats: bool) -> Result<Invite> {
+    pub async fn get(
+        http: impl AsRef<Http>,
+        code: &str,
+        member_counts: bool,
+        expiration: bool,
+        event_id: Option<u64>,
+    ) -> Result<Invite> {
         let mut invite = code;
 
         #[cfg(feature = "utils")]
@@ -161,7 +172,7 @@ impl Invite {
             invite = crate::utils::parse_invite(invite);
         }
 
-        http.as_ref().get_invite(invite, stats).await
+        http.as_ref().get_invite(invite, member_counts, expiration, event_id).await
     }
 
     /// Returns a URL to use for the invite.
@@ -171,14 +182,11 @@ impl Invite {
     /// Retrieve the URL for an invite with the code `WxZumR`:
     ///
     /// ```rust
-    /// # extern crate serde_json;
-    /// # extern crate serenity;
-    /// #
-    /// # use serde_json::json;
+    /// # use serde_json::{json, from_value};
     /// # use serenity::model::prelude::*;
     /// #
     /// # fn main() {
-    /// # let invite = serde_json::from_value::<Invite>(json!({
+    /// # let invite = from_value::<Invite>(json!({
     /// #     "approximate_member_count": Some(1812),
     /// #     "approximate_presence_count": Some(717),
     /// #     "code": "WxZumR",
@@ -206,34 +214,15 @@ impl Invite {
     /// assert_eq!(invite.url(), "https://discord.gg/WxZumR");
     /// # }
     /// ```
+    #[must_use]
     pub fn url(&self) -> String {
         format!("https://discord.gg/{}", self.code)
     }
 }
 
-/// A minimal amount of information about the inviter (person who created the invite).
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[non_exhaustive]
-pub struct InviteUser {
-    pub id: UserId,
-    #[serde(rename = "username")]
-    pub name: String,
-    #[serde(deserialize_with = "deserialize_u16")]
-    pub discriminator: u16,
-    pub avatar: Option<String>,
-}
-
-/// InviteUser implements a Deref to UserId so it gains the convenience methods
-/// for converting it into a [`User`] instance.
-impl Deref for InviteUser {
-    type Target = UserId;
-
-    fn deref(&self) -> &Self::Target {
-        &self.id
-    }
-}
-
 /// A minimal amount of information about the channel an invite points to.
+///
+/// [Discord docs](https://discord.com/developers/docs/resources/invite#invite-object-example-invite-object).
 #[non_exhaustive]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct InviteChannel {
@@ -244,6 +233,8 @@ pub struct InviteChannel {
 }
 
 /// A minimal amount of information about the guild an invite points to.
+///
+/// [Discord docs](https://discord.com/developers/docs/resources/invite#invite-object-example-invite-object).
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct InviteGuild {
@@ -265,10 +256,13 @@ impl InviteGuild {
     /// **Note**: When the cache is enabled, this function unlocks the cache to
     /// retrieve the total number of shards in use. If you already have the
     /// total, consider using [`utils::shard_id`].
+    ///
+    /// [`utils::shard_id`]: crate::utils::shard_id
     #[cfg(all(feature = "cache", feature = "utils"))]
     #[inline]
-    pub async fn shard_id(&self, cache: impl AsRef<Cache>) -> u64 {
-        self.id.shard_id(&cache).await
+    #[must_use]
+    pub fn shard_id(&self, cache: impl AsRef<Cache>) -> u64 {
+        self.id.shard_id(&cache)
     }
 
     /// Returns the Id of the shard associated with the guild.
@@ -293,8 +287,9 @@ impl InviteGuild {
     /// ```
     #[cfg(all(feature = "utils", not(feature = "cache")))]
     #[inline]
-    pub async fn shard_id(&self, shard_count: u64) -> u64 {
-        self.id.shard_id(shard_count).await
+    #[must_use]
+    pub fn shard_id(&self, shard_count: u64) -> u64 {
+        self.id.shard_id(shard_count)
     }
 }
 
@@ -304,6 +299,8 @@ impl InviteGuild {
 /// the [`Invite`] struct.
 ///
 /// [Manage Guild]: Permissions::MANAGE_GUILD
+///
+/// [Discord docs](https://discord.com/developers/docs/resources/invite#invite-metadata-object) (extends [`Invite`] fields).
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct RichInvite {
@@ -313,12 +310,12 @@ pub struct RichInvite {
     /// The unique code for the invite.
     pub code: String,
     /// When the invite was created.
-    pub created_at: DateTime<Utc>,
+    pub created_at: Timestamp,
     /// A representation of the minimal amount of information needed about the
     /// [`Guild`] being invited to.
     pub guild: Option<InviteGuild>,
     /// The user that created the invite.
-    pub inviter: User,
+    pub inviter: Option<User>,
     /// The maximum age of the invite in seconds, from when it was created.
     pub max_age: u64,
     /// The maximum number of times that an invite may be used before it expires.
@@ -363,8 +360,7 @@ impl RichInvite {
                     self.channel.id,
                     guild_id,
                     Permissions::MANAGE_GUILD,
-                )
-                .await?;
+                )?;
             }
         }
 
@@ -378,14 +374,11 @@ impl RichInvite {
     /// Retrieve the URL for an invite with the code `WxZumR`:
     ///
     /// ```rust
-    /// # extern crate serde_json;
-    /// # extern crate serenity;
-    /// #
-    /// # use serde_json::json;
+    /// # use serde_json::{json, from_value};
     /// # use serenity::model::prelude::*;
     /// #
     /// # fn main() {
-    /// # let invite = serde_json::from_value::<RichInvite>(json!({
+    /// # let invite = from_value::<RichInvite>(json!({
     /// #     "code": "WxZumR",
     /// #     "channel": {
     /// #         "id": ChannelId(1),
@@ -418,11 +411,13 @@ impl RichInvite {
     /// assert_eq!(invite.url(), "https://discord.gg/WxZumR");
     /// # }
     /// ```
+    #[must_use]
     pub fn url(&self) -> String {
         format!("https://discord.gg/{}", self.code)
     }
 }
 
+/// [Discord docs](https://discord.com/developers/docs/resources/invite#invite-stage-instance-object).
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct InviteStageInstance {
@@ -436,6 +431,7 @@ pub struct InviteStageInstance {
     topic: String,
 }
 
+/// [Discord docs](https://discord.com/developers/docs/resources/invite#invite-object-invite-target-types).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, PartialOrd, Ord)]
 #[non_exhaustive]
 pub enum InviteTargetType {
@@ -448,5 +444,5 @@ pub enum InviteTargetType {
 enum_number!(InviteTargetType {
     Normal,
     Stream,
-    EmmbeddedApplication,
+    EmmbeddedApplication
 });

@@ -14,25 +14,17 @@ extern crate tracing;
 use std::collections::HashMap;
 use std::env;
 use std::error::Error;
-use std::sync::{atomic::*, Arc};
+use std::sync::atomic::*;
+use std::sync::Arc;
 use std::time::Instant;
 
-use rillrate::prime::{
-    table::{Col, Row},
-    *,
-};
+use rillrate::prime::table::{Col, Row};
+use rillrate::prime::*;
 use serenity::async_trait;
-use serenity::client::{
-    bridge::gateway::{ShardId, ShardManager},
-    Client,
-    Context,
-    EventHandler,
-};
-use serenity::framework::standard::{
-    macros::{command, group, hook},
-    CommandResult,
-    StandardFramework,
-};
+use serenity::client::bridge::gateway::{ShardId, ShardManager};
+use serenity::client::{Client, Context, EventHandler};
+use serenity::framework::standard::macros::{command, group, hook};
+use serenity::framework::standard::{CommandResult, StandardFramework};
 use serenity::model::prelude::*;
 use serenity::prelude::*;
 use tokio::sync::Mutex;
@@ -47,7 +39,7 @@ const PACKAGE: &str = "Bot Dashboards";
 // for cache status, and another one to configure features or trigger actions on the bot.
 const DASHBOARD_STATS: &str = "Statistics";
 const DASHBOARD_CONFIG: &str = "Config Dashboard";
-// This are collapsable menus inside the dashboard, you can use them to group specific sets
+// This are collapsible menus inside the dashboard, you can use them to group specific sets
 // of data inside the same dashboard.
 // If you are using constants for this, make sure they don't end in _GROUP or _COMMAND, because
 // serenity's command framework uses these internally.
@@ -246,7 +238,7 @@ impl EventHandler for Handler {
                 // Get the REST GET latency by counting how long it takes to do a GET request.
                 let get_latency = {
                     let now = Instant::now();
-                    // `let _` to supress any errors. If they are a timeout, that will  be
+                    // `let _` to suppress any errors. If they are a timeout, that will  be
                     // reflected in the plotted graph.
                     let _ = reqwest::get("https://discordapp.com/api/v6/gateway").await;
                     now.elapsed().as_millis() as f64
@@ -335,15 +327,11 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         "info,e15_simple_dashboard=trace,meio=warn,rate_core=warn,rill_engine=warn",
     );
 
-    // Increase compatibility with tracing and the log crate macros used by RillRate.
-    // Some weird things get logged without this if you use tracing.
-    tracing_log::LogTracer::init()?;
-    // Since we use tracing_log, we need to use a different way of subscribing to tracing events
-    // than shown in example 7.
-    let subscriber = tracing_subscriber::FmtSubscriber::builder()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .finish();
-    tracing::subscriber::set_global_default(subscriber)?;
+    // Initialize the logger to use environment variables.
+    //
+    // In this case, a good default is setting the environment variable
+    // `RUST_LOG` to `debug`, but for production, use the variable defined above.
+    tracing_subscriber::fmt::init();
 
     // Start a server on `http://0.0.0.0:6361/`
     // Currently the port is not configurable, but it will be soon enough; thankfully it's not a
@@ -360,84 +348,86 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     let token = env::var("DISCORD_TOKEN")?;
 
-    let mut client = Client::builder(token).event_handler(Handler).framework(framework).await?;
+    // These 3 Pulse are the graphs used to plot the latency overtime.
+    let ws_ping_tracer = Pulse::new(
+        [PACKAGE, DASHBOARD_STATS, GROUP_LATENCY, "Websocket Ping Time"],
+        Default::default(),
+        PulseOpts::default()
+        // The seconds of data to retain, this is 30 minutes.
+        .retain(1800_u32)
+
+        // Column value range
+        .min(0)
+        .max(200)
+
+        // Label used along the values on the column.
+        .suffix("ms".to_string())
+        .divisor(1.0),
+    );
+
+    let get_ping_tracer = Pulse::new(
+        [PACKAGE, DASHBOARD_STATS, GROUP_LATENCY, "Rest GET Ping Time"],
+        Default::default(),
+        PulseOpts::default().retain(1800_u32).min(0).max(200).suffix("ms".to_string()).divisor(1.0),
+    );
+
+    #[cfg(feature = "post-ping")]
+    let post_ping_tracer = Pulse::new(
+        [PACKAGE, DASHBOARD_STATS, GROUP_LATENCY, "Rest POST Ping Time"],
+        Default::default(),
+        PulseOpts::default()
+        .retain(1800_u32)
+        .min(0)
+        // Post latency is on average higher, so we increase the max value on the graph.
+        .max(500)
+        .suffix("ms".to_string())
+        .divisor(1.0),
+    );
+
+    let command_usage_table = Table::new(
+        [PACKAGE, DASHBOARD_STATS, GROUP_COMMAND_COUNT, "Command Usage"],
+        Default::default(),
+        TableOpts::default()
+            .columns(vec![(0, "Command Name".to_string()), (1, "Number of Uses".to_string())]),
+    );
+
+    let mut command_usage_values = HashMap::new();
+
+    // Iterate over the commands of the General group and add them to the table.
+    for (idx, i) in GENERAL_GROUP.options.commands.iter().enumerate() {
+        command_usage_table.add_row(Row(idx as u64));
+        command_usage_table.set_cell(Row(idx as u64), Col(0), i.options.names[0]);
+        command_usage_table.set_cell(Row(idx as u64), Col(1), 0);
+        command_usage_values.insert(i.options.names[0], CommandUsageValue {
+            index: idx,
+            use_count: 0,
+        });
+    }
+
+    let components = Arc::new(Components {
+        ws_ping_history: ws_ping_tracer,
+        get_ping_history: get_ping_tracer,
+        #[cfg(feature = "post-ping")]
+        post_ping_history: post_ping_tracer,
+        data_switch: AtomicBool::new(false),
+        double_link_value: AtomicU8::new(0),
+        command_usage_table,
+        command_usage_values: Mutex::new(command_usage_values),
+    });
+
+    let intents = GatewayIntents::GUILD_MESSAGES
+        | GatewayIntents::DIRECT_MESSAGES
+        | GatewayIntents::MESSAGE_CONTENT;
+    let mut client = Client::builder(token, intents)
+        .event_handler(Handler)
+        .framework(framework)
+        .type_map_insert::<RillRateComponents>(components)
+        .await?;
 
     {
         let mut data = client.data.write().await;
 
         data.insert::<ShardManagerContainer>(Arc::clone(&client.shard_manager));
-
-        // These 3 Pulse are the graphs used to plot the latency overtime.
-        let ws_ping_tracer = Pulse::new(
-            [PACKAGE, DASHBOARD_STATS, GROUP_LATENCY, "Websocket Ping Time"],
-            Default::default(),
-            PulseOpts::default()
-            // The seconds of data to retain, this is 30 minutes.
-            .retain(1800_u32)
-
-            // Column value range
-            .min(0)
-            .max(200)
-
-            // Label used along the values on the column.
-            .suffix("ms".to_string())
-            .divisor(1.0),
-        );
-
-        let get_ping_tracer = Pulse::new(
-            [PACKAGE, DASHBOARD_STATS, GROUP_LATENCY, "Rest GET Ping Time"],
-            Default::default(),
-            PulseOpts::default()
-                .retain(1800_u32)
-                .min(0)
-                .max(200)
-                .suffix("ms".to_string())
-                .divisor(1.0),
-        );
-
-        #[cfg(feature = "post-ping")]
-        let post_ping_tracer = Pulse::new(
-            [PACKAGE, DASHBOARD_STATS, GROUP_LATENCY, "Rest POST Ping Time"],
-            Default::default(),
-            PulseOpts::default()
-            .retain(1800_u32)
-            .min(0)
-            // Post latency is on average higher, so we increase the max value on the graph.
-            .max(500)
-            .suffix("ms".to_string())
-            .divisor(1.0),
-        );
-
-        let command_usage_table = Table::new(
-            [PACKAGE, DASHBOARD_STATS, GROUP_COMMAND_COUNT, "Command Usage"],
-            Default::default(),
-            TableOpts::default()
-                .columns(vec![(0, "Command Name".to_string()), (1, "Number of Uses".to_string())]),
-        );
-
-        let mut command_usage_values = HashMap::new();
-
-        // Iterate over the commands of the General grop and add them to the table.
-        for (idx, i) in GENERAL_GROUP.options.commands.iter().enumerate() {
-            command_usage_table.add_row(Row(idx as u64));
-            command_usage_table.set_cell(Row(idx as u64), Col(0), i.options.names[0]);
-            command_usage_table.set_cell(Row(idx as u64), Col(1), 0);
-            command_usage_values.insert(i.options.names[0], CommandUsageValue {
-                index: idx,
-                use_count: 0,
-            });
-        }
-
-        data.insert::<RillRateComponents>(Arc::new(Components {
-            ws_ping_history: ws_ping_tracer,
-            get_ping_history: get_ping_tracer,
-            #[cfg(feature = "post-ping")]
-            post_ping_history: post_ping_tracer,
-            data_switch: AtomicBool::new(false),
-            double_link_value: AtomicU8::new(0),
-            command_usage_table,
-            command_usage_values: Mutex::new(command_usage_values),
-        }));
     }
 
     client.start().await?;

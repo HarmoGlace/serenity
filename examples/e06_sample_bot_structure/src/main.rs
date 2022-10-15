@@ -10,19 +10,23 @@
 //! ```
 mod commands;
 
-use std::{collections::HashSet, env, sync::Arc};
+use std::collections::HashSet;
+use std::env;
+use std::sync::Arc;
 
-use commands::{math::*, meta::*, owner::*};
-use serenity::{
-    async_trait,
-    client::bridge::gateway::ShardManager,
-    framework::{standard::macros::group, StandardFramework},
-    http::Http,
-    model::{event::ResumedEvent, gateway::Ready},
-    prelude::*,
-};
+use serenity::async_trait;
+use serenity::client::bridge::gateway::ShardManager;
+use serenity::framework::standard::macros::group;
+use serenity::framework::StandardFramework;
+use serenity::http::Http;
+use serenity::model::event::ResumedEvent;
+use serenity::model::gateway::Ready;
+use serenity::prelude::*;
 use tracing::{error, info};
-use tracing_subscriber::{EnvFilter, FmtSubscriber};
+
+use crate::commands::math::*;
+use crate::commands::meta::*;
+use crate::commands::owner::*;
 
 pub struct ShardManagerContainer;
 
@@ -56,15 +60,12 @@ async fn main() {
     // Initialize the logger to use environment variables.
     //
     // In this case, a good default is setting the environment variable
-    // `RUST_LOG` to debug`.
-    let subscriber =
-        FmtSubscriber::builder().with_env_filter(EnvFilter::from_default_env()).finish();
-
-    tracing::subscriber::set_global_default(subscriber).expect("Failed to start the logger");
+    // `RUST_LOG` to `debug`.
+    tracing_subscriber::fmt::init();
 
     let token = env::var("DISCORD_TOKEN").expect("Expected a token in the environment");
 
-    let http = Http::new_with_token(&token);
+    let http = Http::new(&token);
 
     // We will fetch your bot's owners and id
     let (owners, _bot_id) = match http.get_current_application_info().await {
@@ -81,7 +82,10 @@ async fn main() {
     let framework =
         StandardFramework::new().configure(|c| c.owners(owners).prefix("~")).group(&GENERAL_GROUP);
 
-    let mut client = Client::builder(&token)
+    let intents = GatewayIntents::GUILD_MESSAGES
+        | GatewayIntents::DIRECT_MESSAGES
+        | GatewayIntents::MESSAGE_CONTENT;
+    let mut client = Client::builder(&token, intents)
         .framework(framework)
         .event_handler(Handler)
         .await

@@ -1,13 +1,13 @@
-use std::fmt::{Display, Formatter, Result as FmtResult, Write as FmtWrite};
-
-#[cfg(all(feature = "cache", feature = "model"))]
-use serde_json::json;
+use std::fmt;
 
 #[cfg(all(feature = "cache", feature = "model"))]
 use crate::cache::Cache;
+#[cfg(feature = "cache")]
 use crate::http::Http;
 #[cfg(all(feature = "cache", feature = "model"))]
 use crate::internal::prelude::*;
+#[cfg(all(feature = "cache", feature = "model"))]
+use crate::json::json;
 #[cfg(all(feature = "cache", feature = "model"))]
 use crate::model::id::GuildId;
 use crate::model::id::{EmojiId, RoleId};
@@ -19,6 +19,8 @@ use crate::model::ModelError;
 /// Represents a custom guild emoji, which can either be created using the API,
 /// or via an integration. Emojis created using the API only work within the
 /// guild it was created in.
+///
+/// [Discord docs](https://discord.com/developers/docs/resources/emoji#emoji-object).
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct Emoji {
@@ -58,7 +60,7 @@ impl Emoji {
     /// Deletes the emoji.
     /// This method requires the cache to fetch the guild ID.
     ///
-    /// **Note**: The [Manage Emojis] permission is required.
+    /// **Note**: The [Manage Emojis and Stickers] permission is required.
     ///
     ///
     /// # Examples
@@ -66,26 +68,22 @@ impl Emoji {
     /// Delete a given emoji:
     ///
     /// ```rust,no_run
-    /// # use serde_json::json;
+    /// # use serde_json::{json, from_value};
     /// # use serenity::framework::standard::{CommandResult, macros::command};
     /// # use serenity::client::Context;
-    /// # use serenity::model::prelude::{EmojiId, Emoji, Role};
+    /// # use serenity::model::prelude::{EmojiId, Emoji};
     /// #
     /// # #[command]
     /// # async fn example(ctx: &Context) -> CommandResult {
-    /// #     let mut emoji = serde_json::from_value::<Emoji>(json!({
-    /// #         "animated": false,
+    /// #     let mut emoji = from_value::<Emoji>(json!({
     /// #         "id": EmojiId(7),
     /// #         "name": "blobface",
-    /// #         "managed": false,
-    /// #         "require_colons": false,
-    /// #         "roles": Vec::<Role>::new(),
     /// #     }))?;
     /// #
     /// // assuming emoji has been set already
     /// match emoji.delete(&ctx).await {
     ///     Ok(()) => println!("Emoji deleted."),
-    ///     Err(_) => println!("Could not delete emoji.")
+    ///     Err(_) => println!("Could not delete emoji."),
     /// }
     /// #    Ok(())
     /// # }
@@ -97,11 +95,12 @@ impl Emoji {
     /// or may return [`ModelError::ItemMissing`] if the emoji is not
     /// in the cache.
     ///
-    /// [Manage Emojis]: crate::model::permissions::Permissions::MANAGE_EMOJIS
+    /// [Manage Emojis and Stickers]: crate::model::permissions::Permissions::MANAGE_EMOJIS_AND_STICKERS
     #[cfg(feature = "cache")]
     #[inline]
+    #[allow(clippy::trait_duplication_in_bounds)] // https://github.com/rust-lang/rust-clippy/issues/8757
     pub async fn delete<T: AsRef<Cache> + AsRef<Http>>(&self, cache_http: T) -> Result<()> {
-        match self.find_guild_id(&cache_http).await {
+        match self.find_guild_id(&cache_http) {
             Some(guild_id) => {
                 AsRef::<Http>::as_ref(&cache_http).delete_emoji(guild_id.0, self.id.0).await
             },
@@ -112,28 +111,29 @@ impl Emoji {
     /// Edits the emoji by updating it with a new name.
     /// This method requires the cache to fetch the guild ID.
     ///
-    /// **Note**: The [Manage Emojis] permission is required.
+    /// **Note**: The [Manage Emojis and Stickers] permission is required.
     ///
     /// # Errors
     ///
     /// Returns [`Error::Http`] if the current user lacks permission,
     /// or if an invalid name is given.
     ///
-    /// [Manage Emojis]: crate::model::permissions::Permissions::MANAGE_EMOJIS
+    /// [Manage Emojis and Stickers]: crate::model::permissions::Permissions::MANAGE_EMOJIS_AND_STICKERS
     #[cfg(feature = "cache")]
+    #[allow(clippy::trait_duplication_in_bounds)] // https://github.com/rust-lang/rust-clippy/issues/8757
     pub async fn edit<T: AsRef<Cache> + AsRef<Http>>(
         &mut self,
         cache_http: T,
         name: &str,
     ) -> Result<()> {
-        match self.find_guild_id(&cache_http).await {
+        match self.find_guild_id(&cache_http) {
             Some(guild_id) => {
                 let map = json!({
                     "name": name,
                 });
 
                 *self = AsRef::<Http>::as_ref(&cache_http)
-                    .edit_emoji(guild_id.0, self.id.0, &map)
+                    .edit_emoji(guild_id.0, self.id.0, &map, None)
                     .await?;
 
                 Ok(())
@@ -151,32 +151,23 @@ impl Emoji {
     /// Print the guild id that owns this emoji:
     ///
     /// ```rust,no_run
-    /// # use serde_json::json;
-    /// # use serenity::{cache::Cache, model::{guild::{Emoji, Role}, id::EmojiId}};
-    /// # use tokio::sync::RwLock;
-    /// # use std::sync::Arc;
+    /// # use serenity::cache::Cache;
+    /// # use serenity::model::guild::Emoji;
     /// #
-    /// # async fn run() {
-    /// # let cache = Cache::default();
-    /// #
-    /// # let mut emoji = serde_json::from_value::<Emoji>(json!({
-    /// #     "animated": false,
-    /// #     "id": EmojiId(7),
-    /// #     "name": "blobface",
-    /// #     "managed": false,
-    /// #     "require_colons": false,
-    /// #     "roles": Vec::<Role>::new(),
-    /// # })).unwrap();
+    /// # fn run(cache: Cache, emoji: Emoji) {
     /// #
     /// // assuming emoji has been set already
-    /// if let Some(guild_id) = emoji.find_guild_id(&cache).await {
+    /// if let Some(guild_id) = emoji.find_guild_id(&cache) {
     ///     println!("{} is owned by {}", emoji.name, guild_id);
     /// }
     /// # }
     /// ```
     #[cfg(feature = "cache")]
-    pub async fn find_guild_id(&self, cache: impl AsRef<Cache>) -> Option<GuildId> {
-        for guild in cache.as_ref().guilds.read().await.values() {
+    #[must_use]
+    pub fn find_guild_id(&self, cache: impl AsRef<Cache>) -> Option<GuildId> {
+        for guild_entry in cache.as_ref().guilds.iter() {
+            let guild = guild_entry.value();
+
             if guild.emojis.contains_key(&self.id) {
                 return Some(guild.id);
             }
@@ -192,49 +183,38 @@ impl Emoji {
     /// Print the direct link to the given emoji:
     ///
     /// ```rust,no_run
-    /// # extern crate serde_json;
-    /// # extern crate serenity;
+    /// # use serenity::model::guild::Emoji;
     /// #
-    /// # use serde_json::json;
-    /// # use serenity::model::{guild::{Emoji, Role}, id::EmojiId};
-    /// #
-    /// # fn main() {
-    /// # let mut emoji = serde_json::from_value::<Emoji>(json!({
-    /// #     "animated": false,
-    /// #     "id": EmojiId(7),
-    /// #     "name": "blobface",
-    /// #     "managed": false,
-    /// #     "require_colons": false,
-    /// #     "roles": Vec::<Role>::new(),
-    /// # })).unwrap();
+    /// # fn run(emoji: Emoji) {
     /// #
     /// // assuming emoji has been set already
     /// println!("Direct link to emoji image: {}", emoji.url());
     /// # }
     /// ```
     #[inline]
+    #[must_use]
     pub fn url(&self) -> String {
         let extension = if self.animated { "gif" } else { "png" };
-        format!(cdn!("/emojis/{}.{}"), self.id, extension)
+        cdn!("/emojis/{}.{}", self.id, extension)
     }
 }
 
-impl Display for Emoji {
+impl fmt::Display for Emoji {
     /// Formats the emoji into a string that will cause Discord clients to
     /// render the emoji.
     ///
     /// This is in the format of either `<:NAME:EMOJI_ID>` for normal emojis,
     /// or `<a:NAME:EMOJI_ID>` for animated emojis.
-    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.animated {
             f.write_str("<a:")?;
         } else {
             f.write_str("<:")?;
         }
         f.write_str(&self.name)?;
-        FmtWrite::write_char(f, ':')?;
-        Display::fmt(&self.id, f)?;
-        FmtWrite::write_char(f, '>')
+        fmt::Write::write_char(f, ':')?;
+        fmt::Display::fmt(&self.id, f)?;
+        fmt::Write::write_char(f, '>')
     }
 }
 

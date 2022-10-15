@@ -14,6 +14,7 @@
 //!
 //! [`serenity::Error`]: crate::Error
 
+#[cfg(feature = "tokio")]
 pub use tokio::sync::{Mutex, RwLock};
 #[cfg(feature = "client")]
 pub use typemap_rev::{TypeMap, TypeMapKey};
@@ -27,6 +28,6 @@ pub use crate::error::Error as SerenityError;
 pub use crate::gateway::GatewayError;
 #[cfg(feature = "http")]
 pub use crate::http::HttpError;
-pub use crate::model::misc::Mentionable;
+pub use crate::model::mention::Mentionable;
 #[cfg(feature = "model")]
-pub use crate::model::ModelError;
+pub use crate::model::{gateway::GatewayIntents, ModelError};

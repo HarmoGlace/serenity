@@ -6,9 +6,12 @@ pub const EMBED_MAX_LENGTH: usize = 6000;
 /// The maximum number of embeds in a message.
 pub const EMBED_MAX_COUNT: usize = 10;
 
-/// The gateway version used by the library. The gateway URI is retrieved via
+/// The maximum number of stickers in a message.
+pub const STICKER_MAX_COUNT: usize = 3;
+
+/// The gateway version used by the library. The gateway URL is retrieved via
 /// the REST API.
-pub const GATEWAY_VERSION: u8 = 9;
+pub const GATEWAY_VERSION: u8 = 10;
 
 /// The large threshold to send on identify.
 pub const LARGE_THRESHOLD: u8 = 250;
@@ -29,50 +32,25 @@ pub const USER_AGENT: &str = concat!(
 );
 
 /// List of messages Discord shows on member join.
-#[allow(clippy::non_ascii_literal)] // allow for discord join messages
 pub static JOIN_MESSAGES: &[&str] = &[
-    "$user just joined the server - glhf!",
-    "$user just joined. Everyone, look busy!",
-    "$user just joined. Can I get a heal?",
-    "$user joined your party.",
-    "$user joined. You must construct additional pylons.",
-    "Ermagherd. $user is here.",
-    "Welcome, $user. Stay awhile and listen.",
-    "Welcome, $user. We were expecting you ( ͡° ͜ʖ ͡°)",
+    "$user joined the party.",
+    "$user is here.",
     "Welcome, $user. We hope you brought pizza.",
-    "Welcome $user. Leave your weapons by the door.",
     "A wild $user appeared.",
-    "Swoooosh. $user just landed.",
-    "Brace yourselves. $user just joined the server.",
-    "$user just joined... or did they?",
-    "$user just arrived. Seems OP - please nerf.",
+    "$user just landed.",
     "$user just slid into the server.",
-    "A $user has spawned in the server.",
-    "Big $user showed up!",
-    "Where’s $user? In the server!",
-    "$user hopped into the server. Kangaroo!!",
-    "$user just showed up. Hold my beer.",
-    "Challenger approaching - $user has appeared!",
-    "It's a bird! It's a plane! Nevermind, it's just $user.",
-    r"It's $user! Praise the sun! \[T]/",
-    "Never gonna give $user up. Never gonna let $user down.",
-    "$user has joined the battle bus.",
-    "Cheers, love! $user's here!",
-    "Hey! Listen! $user has joined!",
-    "We've been expecting you $user",
-    "It's dangerous to go alone, take $user!",
-    "$user has joined the server! It's super effective!",
-    "Cheers, love! $user is here!",
-    "$user is here, as the prophecy foretold.",
-    "$user has arrived. Party's over.",
-    "Ready player $user",
-    "$user is here to kick butt and chew bubblegum. And $user is all out of gum.",
-    "Hello. Is it $user you're looking for?",
-    "$user has joined. Stay a while and listen!",
-    "Roses are red, violets are blue, $user joined this server with you",
+    "$user just showed up!",
+    "Welcome $user. Say hi!",
+    "$user hopped into the server.",
+    "Everyone welcome $user!",
+    "Glad you're here, $user.",
+    "Good to see you, $user.",
+    "Yay you made it, $user!",
 ];
 
 /// Enum to map gateway opcodes.
+///
+/// [Discord docs](https://discord.com/developers/docs/topics/opcodes-and-status-codes#gateway-gateway-opcodes).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, PartialOrd, Ord)]
 #[non_exhaustive]
 pub enum OpCode {

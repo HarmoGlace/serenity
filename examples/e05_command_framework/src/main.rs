@@ -8,39 +8,33 @@
 //! git = "https://github.com/serenity-rs/serenity.git"
 //! features = ["framework", "standard_framework"]
 //! ```
-use std::{
-    collections::{HashMap, HashSet},
-    env,
-    fmt::Write,
-    sync::Arc,
-};
+use std::collections::{HashMap, HashSet};
+use std::env;
+use std::fmt::Write;
+use std::sync::Arc;
 
-use serenity::prelude::*;
-use serenity::{
-    async_trait,
-    client::bridge::gateway::{GatewayIntents, ShardId, ShardManager},
-    framework::standard::{
-        buckets::{LimitedFor, RevertBucket},
-        help_commands,
-        macros::{check, command, group, help, hook},
-        Args,
-        CommandGroup,
-        CommandOptions,
-        CommandResult,
-        DispatchError,
-        HelpOptions,
-        Reason,
-        StandardFramework,
-    },
-    http::Http,
-    model::{
-        channel::{Channel, Message},
-        gateway::Ready,
-        id::UserId,
-        permissions::Permissions,
-    },
-    utils::{content_safe, ContentSafeOptions},
+use serenity::async_trait;
+use serenity::client::bridge::gateway::{ShardId, ShardManager};
+use serenity::framework::standard::buckets::{LimitedFor, RevertBucket};
+use serenity::framework::standard::macros::{check, command, group, help, hook};
+use serenity::framework::standard::{
+    help_commands,
+    Args,
+    CommandGroup,
+    CommandOptions,
+    CommandResult,
+    DispatchError,
+    HelpOptions,
+    Reason,
+    StandardFramework,
 };
+use serenity::http::Http;
+use serenity::model::channel::{Channel, Message};
+use serenity::model::gateway::{GatewayIntents, Ready};
+use serenity::model::id::UserId;
+use serenity::model::permissions::Permissions;
+use serenity::prelude::*;
+use serenity::utils::{content_safe, ContentSafeOptions};
 use tokio::sync::Mutex;
 
 // A container type is created for inserting into the Client's `data`, which
@@ -187,7 +181,7 @@ async fn delay_action(ctx: &Context, msg: &Message) {
 }
 
 #[hook]
-async fn dispatch_error(ctx: &Context, msg: &Message, error: DispatchError) {
+async fn dispatch_error(ctx: &Context, msg: &Message, error: DispatchError, _command_name: &str) {
     if let DispatchError::Ratelimited(info) = error {
         // We notify them only once.
         if info.is_first_try {
@@ -201,11 +195,13 @@ async fn dispatch_error(ctx: &Context, msg: &Message, error: DispatchError) {
 
 // You can construct a hook without the use of a macro, too.
 // This requires some boilerplate though and the following additional import.
-use serenity::{futures::future::BoxFuture, FutureExt};
+use serenity::futures::future::BoxFuture;
+use serenity::FutureExt;
 fn _dispatch_error_no_macro<'fut>(
     ctx: &'fut mut Context,
     msg: &'fut Message,
     error: DispatchError,
+    _command_name: &str,
 ) -> BoxFuture<'fut, ()> {
     async move {
         if let DispatchError::Ratelimited(info) = error {
@@ -225,7 +221,7 @@ async fn main() {
     // Configure the client with your Discord bot token in the environment.
     let token = env::var("DISCORD_TOKEN").expect("Expected a token in the environment");
 
-    let http = Http::new_with_token(&token);
+    let http = Http::new(&token);
 
     // We will fetch your bot's owners and id
     let (owners, bot_id) = match http.get_current_application_info().await {
@@ -304,22 +300,22 @@ async fn main() {
         .group(&MATH_GROUP)
         .group(&OWNER_GROUP);
 
-    let mut client = Client::builder(&token)
+    // For this example to run properly, the "Presence Intent" and "Server Members Intent"
+    // options need to be enabled.
+    // These are needed so the `required_permissions` macro works on the commands that need to
+    // use it.
+    // You will need to enable these 2 options on the bot application, and possibly wait up to 5
+    // minutes.
+    let intents = GatewayIntents::all();
+    let mut client = Client::builder(&token, intents)
         .event_handler(Handler)
         .framework(framework)
-        // For this example to run properly, the "Presence Intent" and "Server Members Intent" 
-        // options need to be enabled.
-        // These are needed so the `required_permissions` macro works on the commands that need to
-        // use it.
-        // You will need to enable these 2 options on the bot application, and possibly wait up to 5
-        // minutes.
-        .intents(GatewayIntents::all())
+        .type_map_insert::<CommandCounter>(HashMap::default())
         .await
         .expect("Err creating client");
 
     {
         let mut data = client.data.write().await;
-        data.insert::<CommandCounter>(HashMap::default());
         data.insert::<ShardManagerContainer>(Arc::clone(&client.shard_manager));
     }
 
@@ -352,25 +348,33 @@ async fn commands(ctx: &Context, msg: &Message) -> CommandResult {
 // mentions are replaced with a safe textual alternative.
 // In this example channel mentions are excluded via the `ContentSafeOptions`.
 #[command]
-async fn say(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
-    let settings = if let Some(guild_id) = msg.guild_id {
-        // By default roles, users, and channel mentions are cleaned.
-        ContentSafeOptions::default()
-            // We do not want to clean channal mentions as they
-            // do not ping users.
-            .clean_channel(false)
-            // If it's a guild channel, we want mentioned users to be displayed
-            // as their display name.
-            .display_as_member_from(guild_id)
-    } else {
-        ContentSafeOptions::default().clean_channel(false).clean_role(false)
+async fn say(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
+    match args.single_quoted::<String>() {
+        Ok(x) => {
+            let settings = if let Some(guild_id) = msg.guild_id {
+                // By default roles, users, and channel mentions are cleaned.
+                ContentSafeOptions::default()
+                    // We do not want to clean channal mentions as they
+                    // do not ping users.
+                    .clean_channel(false)
+                    // If it's a guild channel, we want mentioned users to be displayed
+                    // as their display name.
+                    .display_as_member_from(guild_id)
+            } else {
+                ContentSafeOptions::default().clean_channel(false).clean_role(false)
+            };
+
+            let content = content_safe(&ctx.cache, x, &settings, &msg.mentions);
+
+            msg.channel_id.say(&ctx.http, &content).await?;
+
+            return Ok(());
+        },
+        Err(_) => {
+            msg.reply(ctx, "An argument is required to run this command.").await?;
+            return Ok(());
+        },
     };
-
-    let content = content_safe(&ctx.cache, &args.rest(), &settings).await;
-
-    msg.channel_id.say(&ctx.http, &content).await?;
-
-    Ok(())
 }
 
 // A function which acts as a "check", to determine whether to call a command.
@@ -419,7 +423,7 @@ async fn some_long_command(ctx: &Context, msg: &Message, args: Args) -> CommandR
 async fn about_role(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     let potential_role_name = args.rest();
 
-    if let Some(guild) = msg.guild(&ctx.cache).await {
+    if let Some(guild) = msg.guild(&ctx.cache) {
         // `role_by_name()` allows us to attempt attaining a reference to a role
         // via its name.
         if let Some(role) = guild.role_by_name(potential_role_name) {
@@ -550,7 +554,6 @@ async fn am_i_admin(ctx: &Context, msg: &Message, _args: Args) -> CommandResult 
         for role in &member.roles {
             if role
                 .to_role_cached(&ctx.cache)
-                .await
                 .map_or(false, |r| r.has_permission(Permissions::ADMINISTRATOR))
             {
                 msg.channel_id.say(&ctx.http, "Yes, you are.").await?;
@@ -569,7 +572,7 @@ async fn am_i_admin(ctx: &Context, msg: &Message, _args: Args) -> CommandResult 
 async fn slow_mode(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
     let say_content = if let Ok(slow_mode_rate_seconds) = args.single::<u64>() {
         if let Err(why) =
-            msg.channel_id.edit(&ctx.http, |c| c.slow_mode_rate(slow_mode_rate_seconds)).await
+            msg.channel_id.edit(&ctx.http, |c| c.rate_limit_per_user(slow_mode_rate_seconds)).await
         {
             println!("Error setting channel's slow mode rate: {:?}", why);
 
@@ -577,9 +580,9 @@ async fn slow_mode(ctx: &Context, msg: &Message, mut args: Args) -> CommandResul
         } else {
             format!("Successfully set slow mode rate to `{}` seconds.", slow_mode_rate_seconds)
         }
-    } else if let Some(Channel::Guild(channel)) = msg.channel_id.to_channel_cached(&ctx.cache).await
-    {
-        format!("Current slow mode rate is `{}` seconds.", channel.slow_mode_rate.unwrap_or(0))
+    } else if let Some(Channel::Guild(channel)) = msg.channel_id.to_channel_cached(&ctx.cache) {
+        let slow_mode_rate = channel.rate_limit_per_user.unwrap_or(0);
+        format!("Current slow mode rate is `{}` seconds.", slow_mode_rate)
     } else {
         "Failed to find channel in cache.".to_string()
     };

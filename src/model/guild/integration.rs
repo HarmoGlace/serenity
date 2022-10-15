@@ -1,6 +1,9 @@
 use super::*;
+use crate::model::Timestamp;
 
 /// Various information about integrations.
+///
+/// [Discord docs](https://discord.com/developers/docs/resources/guild#integration-object).
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct Integration {
@@ -15,7 +18,7 @@ pub struct Integration {
     pub kind: String,
     pub name: String,
     pub role_id: Option<RoleId>,
-    pub synced_at: Option<u64>,
+    pub synced_at: Option<Timestamp>,
     pub syncing: Option<bool>,
     pub user: Option<User>,
     pub enable_emoticons: Option<bool>,
@@ -25,6 +28,8 @@ pub struct Integration {
 }
 
 /// The behavior once the integration expires.
+///
+/// [Discord docs](https://discord.com/developers/docs/resources/guild#integration-object-integration-expire-behaviors).
 #[derive(Copy, Clone, Debug, Hash, Eq, PartialEq, PartialOrd, Ord)]
 #[non_exhaustive]
 #[repr(u8)]
@@ -47,6 +52,8 @@ impl From<Integration> for IntegrationId {
 }
 
 /// Integration account object.
+///
+/// [Discord docs](https://discord.com/developers/docs/resources/guild#integration-account-object).
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct IntegrationAccount {
@@ -55,6 +62,8 @@ pub struct IntegrationAccount {
 }
 
 /// Integration application object.
+///
+/// [Discord docs](https://discord.com/developers/docs/resources/guild#integration-application-object).
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct IntegrationApplication {
@@ -62,6 +71,5 @@ pub struct IntegrationApplication {
     pub name: String,
     pub icon: Option<String>,
     pub description: String,
-    pub summary: String,
     pub bot: Option<User>,
 }

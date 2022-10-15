@@ -1,5 +1,11 @@
+// From HTTP you can only get PartialGuild; for Guild you need gateway and cache
+#![cfg(feature = "cache")]
+
+use std::fmt;
+
 use super::ArgumentConvert;
-use crate::{model::prelude::*, prelude::*};
+use crate::model::prelude::*;
+use crate::prelude::*;
 
 /// Error that can be returned from [`Guild::convert`].
 #[non_exhaustive]
@@ -12,10 +18,10 @@ pub enum GuildParseError {
 
 impl std::error::Error for GuildParseError {}
 
-impl std::fmt::Display for GuildParseError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for GuildParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::NotFoundOrMalformed => write!(f, "Guild not found or unknown format"),
+            Self::NotFoundOrMalformed => f.write_str("Guild not found or unknown format"),
         }
     }
 }
@@ -23,7 +29,6 @@ impl std::fmt::Display for GuildParseError {
 /// Look up a Guild, either by ID or by a string case-insensitively.
 ///
 /// Requires the cache feature to be enabled.
-#[cfg(feature = "cache")]
 #[async_trait::async_trait]
 impl ArgumentConvert for Guild {
     type Err = GuildParseError;
@@ -34,12 +39,21 @@ impl ArgumentConvert for Guild {
         _channel_id: Option<ChannelId>,
         s: &str,
     ) -> Result<Self, Self::Err> {
-        let guilds = ctx.cache.guilds.read().await;
+        let guilds = &ctx.cache.guilds;
 
-        let lookup_by_id = || guilds.get(&GuildId(s.parse().ok()?));
+        let lookup_by_id = || guilds.get(&GuildId(s.parse().ok()?)).map(|g| g.clone());
 
-        let lookup_by_name = || guilds.values().find(|guild| guild.name.eq_ignore_ascii_case(s));
+        let lookup_by_name = || {
+            guilds.iter().find_map(|m| {
+                let guild = m.value();
+                if guild.name.eq_ignore_ascii_case(s) {
+                    Some(guild.clone())
+                } else {
+                    None
+                }
+            })
+        };
 
-        lookup_by_id().or_else(lookup_by_name).cloned().ok_or(GuildParseError::NotFoundOrMalformed)
+        lookup_by_id().or_else(lookup_by_name).ok_or(GuildParseError::NotFoundOrMalformed)
     }
 }

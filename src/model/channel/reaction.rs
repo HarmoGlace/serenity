@@ -1,10 +1,10 @@
+#[cfg(feature = "model")]
+use std::cmp::Ordering;
 use std::convert::TryFrom;
+#[cfg(doc)]
+use std::fmt::Display as _;
+use std::fmt::{self, Write as _};
 use std::str::FromStr;
-use std::{
-    cmp::Ordering,
-    error::Error as StdError,
-    fmt::{self, Display, Formatter, Result as FmtResult, Write as FmtWrite},
-};
 
 use serde::de::{Deserialize, Error as DeError, MapAccess, Visitor};
 use serde::ser::{Serialize, SerializeMap, Serializer};
@@ -17,6 +17,8 @@ use crate::internal::prelude::*;
 use crate::model::prelude::*;
 
 /// An emoji reaction to a message.
+///
+/// [Discord docs](https://discord.com/developers/docs/topics/gateway#message-reaction-add-message-reaction-add-event-fields).
 #[derive(Clone, Debug, Serialize)]
 #[non_exhaustive]
 pub struct Reaction {
@@ -58,43 +60,28 @@ impl<'de> Deserialize<'de> for Reaction {
             .and_then(ReactionType::deserialize)
             .map_err(DeError::custom)?;
 
-        let user_id = match map.contains_key("user_id") {
-            true => Some(
-                map.remove("user_id")
-                    .ok_or_else(|| DeError::custom("expected user_id"))
-                    .and_then(UserId::deserialize)
-                    .map_err(DeError::custom)?,
-            ),
-            false => None,
-        };
+        let user_id =
+            map.remove("user_id").map(UserId::deserialize).transpose().map_err(DeError::custom)?;
 
-        let guild_id = match map.contains_key("guild_id") {
-            true => Some(
-                map.remove("guild_id")
-                    .ok_or_else(|| DeError::custom("expected guild_id"))
-                    .and_then(GuildId::deserialize)
-                    .map_err(DeError::custom)?,
-            ),
-            false => None,
-        };
+        let guild_id = map
+            .remove("guild_id")
+            .map(GuildId::deserialize)
+            .transpose()
+            .map_err(DeError::custom)?;
 
         if let Some(id) = guild_id {
             if let Some(member) = map.get_mut("member") {
                 if let Some(object) = member.as_object_mut() {
-                    object.insert("guild_id".to_owned(), Value::String(id.to_string()));
+                    object.insert("guild_id".to_owned(), Value::from(id.to_string()));
                 }
             }
         }
 
-        let member = match map.contains_key("member") {
-            true => Some(
-                map.remove("member")
-                    .ok_or_else(|| DeError::custom("expected member"))
-                    .and_then(PartialMember::deserialize)
-                    .map_err(DeError::custom)?,
-            ),
-            false => None,
-        };
+        let member = map
+            .remove("member")
+            .map(PartialMember::deserialize)
+            .transpose()
+            .map_err(DeError::custom)?;
 
         Ok(Self {
             channel_id,
@@ -152,7 +139,7 @@ impl Reaction {
         #[cfg(feature = "cache")]
         {
             if let Some(cache) = cache_http.cache() {
-                if self.user_id.is_some() && self.user_id == Some(cache.current_user().await.id) {
+                if self.user_id.is_some() && self.user_id == Some(cache.current_user().id) {
                     user_id = None;
                 }
 
@@ -162,8 +149,7 @@ impl Reaction {
                         self.channel_id,
                         self.guild_id,
                         Permissions::MANAGE_MESSAGES,
-                    )
-                    .await?;
+                    )?;
                 }
             }
         }
@@ -197,8 +183,7 @@ impl Reaction {
                     self.channel_id,
                     self.guild_id,
                     Permissions::MANAGE_MESSAGES,
-                )
-                .await?;
+                )?;
             }
         }
         cache_http
@@ -238,20 +223,19 @@ impl Reaction {
     /// Returns [`Error::Http`] if the user that made the reaction is unable to be
     /// retrieved from the API.
     pub async fn user(&self, cache_http: impl CacheHttp) -> Result<User> {
-        match self.user_id {
-            Some(id) => id.to_user(cache_http).await,
-            None => {
-                // This can happen if only Http was passed to Message::react, even though
-                // "cache" was enabled.
-                #[cfg(feature = "cache")]
-                {
-                    if let Some(cache) = cache_http.cache() {
-                        return Ok(User::from(&cache.current_user().await));
-                    }
+        if let Some(id) = self.user_id {
+            id.to_user(cache_http).await
+        } else {
+            // This can happen if only Http was passed to Message::react, even though
+            // "cache" was enabled.
+            #[cfg(feature = "cache")]
+            {
+                if let Some(cache) = cache_http.cache() {
+                    return Ok(User::from(&cache.current_user()));
                 }
+            }
 
-                Ok(cache_http.http().get_current_user().await?.into())
-            },
+            Ok(cache_http.http().get_current_user().await?.into())
         }
     }
 
@@ -302,7 +286,7 @@ impl Reaction {
 
         if limit > 100 {
             limit = 100;
-            warn!("Rection users limit clamped to 100! (API Restriction)");
+            warn!("Reaction users limit clamped to 100! (API Restriction)");
         }
 
         http.as_ref()
@@ -352,7 +336,7 @@ impl<'de> Deserialize<'de> for ReactionType {
         impl<'de> Visitor<'de> for ReactionTypeVisitor {
             type Value = ReactionType;
 
-            fn expecting(&self, formatter: &mut Formatter<'_>) -> FmtResult {
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
                 formatter.write_str("enum ReactionType")
             }
 
@@ -376,7 +360,7 @@ impl<'de> Deserialize<'de> for ReactionType {
                             }
 
                             if let Ok(emoji_id) = map.next_value::<EmojiId>() {
-                                id = Some(emoji_id)
+                                id = Some(emoji_id);
                             }
                         },
                         Field::Name => {
@@ -384,23 +368,21 @@ impl<'de> Deserialize<'de> for ReactionType {
                                 return Err(DeError::duplicate_field("name"));
                             }
 
-                            name = Some(map.next_value()?);
+                            name = Some(map.next_value::<Option<String>>()?);
                         },
                     }
                 }
 
-                let animated = animated.unwrap_or(false);
-                let name = name.ok_or_else(|| DeError::missing_field("name"))?;
-
-                Ok(if let Some(id) = id {
-                    ReactionType::Custom {
-                        animated,
+                let rt = match (id, name) {
+                    (Some(id), name) => ReactionType::Custom {
+                        animated: animated.unwrap_or_default(),
                         id,
-                        name,
-                    }
-                } else {
-                    ReactionType::Unicode(name.unwrap())
-                })
+                        name: name.flatten(),
+                    },
+                    (None, Some(Some(name))) => ReactionType::Unicode(name),
+                    _ => return Err(DeError::custom("invalid reaction type data")),
+                };
+                Ok(rt)
             }
         }
 
@@ -422,7 +404,7 @@ impl Serialize for ReactionType {
                 let mut map = serializer.serialize_map(Some(3))?;
 
                 map.serialize_entry("animated", &animated)?;
-                map.serialize_entry("id", &id.0)?;
+                map.serialize_entry("id", &id)?;
                 map.serialize_entry("name", &name)?;
 
                 map.end()
@@ -447,6 +429,7 @@ impl ReactionType {
     /// **Note**: This is mainly for use internally. There is otherwise most
     /// likely little use for it.
     #[inline]
+    #[must_use]
     pub fn as_data(&self) -> String {
         match *self {
             ReactionType::Custom {
@@ -454,7 +437,7 @@ impl ReactionType {
                 ref name,
                 ..
             } => {
-                format!("{}:{}", name.as_ref().map_or("", |s| s.as_str()), id)
+                format!("{}:{}", name.as_ref().map_or("", String::as_str), id)
             },
             ReactionType::Unicode(ref unicode) => unicode.clone(),
         }
@@ -463,6 +446,7 @@ impl ReactionType {
     /// Helper function to allow testing equality of unicode emojis without
     /// having to perform any allocation.
     /// Will always return false if the reaction was not a unicode reaction.
+    #[must_use]
     pub fn unicode_eq(&self, other: &str) -> bool {
         if let ReactionType::Unicode(unicode) = &self {
             unicode == other
@@ -475,6 +459,7 @@ impl ReactionType {
     /// Helper function to allow comparing unicode emojis without having
     /// to perform any allocation.
     /// Will return None if the reaction was not a unicode reaction.
+    #[must_use]
     pub fn unicode_partial_cmp(&self, other: &str) -> Option<Ordering> {
         if let ReactionType::Unicode(unicode) = &self {
             Some(unicode.as_str().cmp(other))
@@ -548,9 +533,9 @@ impl From<EmojiIdentifier> for ReactionType {
 #[derive(Debug)]
 pub struct ReactionConversionError;
 
-impl Display for ReactionConversionError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "failed to convert from a string to ReactionType")
+impl fmt::Display for ReactionConversionError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("failed to convert from a string to ReactionType")
     }
 }
 
@@ -651,22 +636,6 @@ impl<'a> TryFrom<&'a str> for ReactionType {
     }
 }
 
-// TODO: Change this to `!` once it becomes stable.
-#[derive(Debug)]
-pub enum NeverFails {}
-
-impl Display for NeverFails {
-    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        write!(f, "never fails")
-    }
-}
-
-impl StdError for NeverFails {
-    fn description(&self) -> &str {
-        "never fails"
-    }
-}
-
 impl FromStr for ReactionType {
     type Err = ReactionConversionError;
 
@@ -675,7 +644,7 @@ impl FromStr for ReactionType {
     }
 }
 
-impl Display for ReactionType {
+impl fmt::Display for ReactionType {
     /// Formats the reaction type, displaying the associated emoji in a
     /// way that clients can understand.
     ///
@@ -683,7 +652,7 @@ impl Display for ReactionType {
     /// the documentation for [emoji's formatter][`Emoji::fmt`] on how this is
     /// displayed. Otherwise, if the type is a
     /// [unicode][`ReactionType::Unicode`], then the inner unicode is displayed.
-    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
             ReactionType::Custom {
                 animated,
@@ -695,9 +664,9 @@ impl Display for ReactionType {
                 } else {
                     f.write_str("<:")?;
                 }
-                f.write_str(name.as_ref().map_or("", |s| s.as_str()))?;
+                f.write_str(name.as_ref().map_or("", String::as_str))?;
                 f.write_char(':')?;
-                Display::fmt(&id, f)?;
+                fmt::Display::fmt(&id, f)?;
                 f.write_char('>')
             },
             ReactionType::Unicode(ref unicode) => f.write_str(unicode),

@@ -1,10 +1,9 @@
 use std::collections::HashMap;
 
-use serde_json::Value;
-
 use super::{CreateAllowedMentions, CreateEmbed};
 use crate::builder::CreateComponents;
-use crate::utils;
+use crate::json;
+use crate::json::prelude::*;
 
 #[derive(Clone, Debug, Default)]
 pub struct EditInteractionResponse(pub HashMap<&'static str, Value>);
@@ -21,12 +20,12 @@ impl EditInteractionResponse {
     }
 
     fn _content(&mut self, content: String) -> &mut Self {
-        self.0.insert("content", Value::String(content));
+        self.0.insert("content", Value::from(content));
         self
     }
 
     /// Creates an embed for the message.
-    pub fn create_embed<F>(&mut self, f: F) -> &mut Self
+    pub fn embed<F>(&mut self, f: F) -> &mut Self
     where
         F: FnOnce(&mut CreateEmbed) -> &mut CreateEmbed,
     {
@@ -37,14 +36,35 @@ impl EditInteractionResponse {
 
     /// Adds an embed for the message.
     pub fn add_embed(&mut self, embed: CreateEmbed) -> &mut Self {
-        let map = utils::hashmap_to_json_map(embed.0);
-        let embed = Value::Object(map);
+        let map = json::hashmap_to_json_map(embed.0);
+        let embed = Value::from(map);
 
-        let embeds = self.0.entry("embeds").or_insert_with(|| Value::Array(vec![]));
+        let embeds = self.0.entry("embeds").or_insert_with(|| Value::from(Vec::<Value>::new()));
 
         if let Some(embeds) = embeds.as_array_mut() {
             embeds.push(embed);
         }
+
+        self
+    }
+
+    /// Adds multiple embeds to the message.
+    pub fn add_embeds(&mut self, embeds: Vec<CreateEmbed>) -> &mut Self {
+        for embed in embeds {
+            self.add_embed(embed);
+        }
+
+        self
+    }
+
+    /// Sets a single embed to include in the message
+    ///
+    /// Calling this will overwrite the embed list.
+    /// To append embeds, call [`Self::add_embed`] instead.
+    pub fn set_embed(&mut self, embed: CreateEmbed) -> &mut Self {
+        let map = json::hashmap_to_json_map(embed.0);
+        let embed = Value::from(map);
+        self.0.insert("embeds", Value::from(vec![embed]));
 
         self
     }
@@ -71,15 +91,14 @@ impl EditInteractionResponse {
     {
         let mut allowed_mentions = CreateAllowedMentions::default();
         f(&mut allowed_mentions);
-        let map = utils::hashmap_to_json_map(allowed_mentions.0);
-        let allowed_mentions = Value::Object(map);
+        let map = json::hashmap_to_json_map(allowed_mentions.0);
+        let allowed_mentions = Value::from(map);
 
         self.0.insert("allowed_mentions", allowed_mentions);
         self
     }
 
     /// Sets the components of this message.
-    #[cfg(feature = "unstable_discord_api")]
     pub fn components<F>(&mut self, f: F) -> &mut Self
     where
         F: FnOnce(&mut CreateComponents) -> &mut CreateComponents,
@@ -87,7 +106,7 @@ impl EditInteractionResponse {
         let mut components = CreateComponents::default();
         f(&mut components);
 
-        self.0.insert("components", Value::Array(components.0));
+        self.0.insert("components", Value::from(components.0));
         self
     }
 }

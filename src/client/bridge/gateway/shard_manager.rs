@@ -1,7 +1,5 @@
-use std::{
-    collections::{HashMap, VecDeque},
-    sync::Arc,
-};
+use std::collections::{HashMap, VecDeque};
+use std::sync::Arc;
 
 use futures::channel::mpsc::{self, UnboundedReceiver as Receiver, UnboundedSender as Sender};
 use futures::StreamExt;
@@ -11,7 +9,6 @@ use tracing::{info, instrument, warn};
 use typemap_rev::TypeMap;
 
 use super::{
-    GatewayIntents,
     ShardId,
     ShardManagerMessage,
     ShardManagerMonitor,
@@ -26,6 +23,7 @@ use crate::client::{EventHandler, RawEventHandler};
 use crate::framework::Framework;
 use crate::internal::prelude::*;
 use crate::internal::tokio::spawn_named;
+use crate::model::gateway::GatewayIntents;
 use crate::CacheAndHttp;
 
 /// A manager for handling the status of shards by starting them, restarting
@@ -50,27 +48,30 @@ use crate::CacheAndHttp;
 /// # #[cfg(feature = "framework")]
 /// # async fn run() -> Result<(), Box<dyn Error>> {
 /// #
-/// use tokio::sync::{Mutex, RwLock};
-/// use serenity::client::bridge::gateway::{ShardManager, ShardManagerOptions, GatewayIntents};
-/// use serenity::client::{EventHandler, RawEventHandler};
-/// use serenity::http::Http;
-/// use serenity::CacheAndHttp;
-/// use serenity::prelude::*;
-/// use serenity::framework::{Framework, StandardFramework};
-/// use std::sync::Arc;
 /// use std::env;
+/// use std::sync::Arc;
+///
+/// use serenity::client::bridge::gateway::{ShardManager, ShardManagerOptions};
+/// use serenity::client::{EventHandler, RawEventHandler};
+/// use serenity::framework::{Framework, StandardFramework};
+/// use serenity::http::Http;
+/// use serenity::model::gateway::GatewayIntents;
+/// use serenity::prelude::*;
+/// use serenity::CacheAndHttp;
+/// use tokio::sync::{Mutex, RwLock};
 ///
 /// struct Handler;
 ///
-/// impl EventHandler for Handler { }
-/// impl RawEventHandler for Handler { }
+/// impl EventHandler for Handler {}
+/// impl RawEventHandler for Handler {}
 ///
-/// # let cache_and_http = Arc::new(CacheAndHttp::default());
+/// # let cache_and_http: Arc<CacheAndHttp> = unimplemented!();
 /// # let http = &cache_and_http.http;
 /// let gateway_url = Arc::new(Mutex::new(http.get_gateway().await?.url));
 /// let data = Arc::new(RwLock::new(TypeMap::new()));
 /// let event_handler = Arc::new(Handler) as Arc<dyn EventHandler>;
-/// let framework = Arc::new(Box::new(StandardFramework::new()) as Box<dyn Framework + 'static + Send + Sync>);
+/// let framework =
+///     Arc::new(StandardFramework::new()) as Arc<dyn Framework + Send + Sync + 'static>;
 ///
 /// ShardManager::new(ShardManagerOptions {
 ///     data: &data,
@@ -125,8 +126,8 @@ impl ShardManager {
 
         let mut shard_queuer = ShardQueuer {
             data: Arc::clone(opt.data),
-            event_handler: opt.event_handler.as_ref().map(|h| Arc::clone(h)),
-            raw_event_handler: opt.raw_event_handler.as_ref().map(|rh| Arc::clone(rh)),
+            event_handler: opt.event_handler.as_ref().map(Arc::clone),
+            raw_event_handler: opt.raw_event_handler.as_ref().map(Arc::clone),
             #[cfg(feature = "framework")]
             framework: Arc::clone(opt.framework),
             last_start: None,
@@ -217,17 +218,19 @@ impl ShardManager {
     /// concept is the same)_
     ///
     /// ```rust,no_run
-    /// use serenity::client::bridge::gateway::ShardId;
-    /// use serenity::client::{Client, EventHandler};
     /// use std::env;
+    ///
+    /// use serenity::client::bridge::gateway::ShardId;
+    /// use serenity::prelude::*;
     ///
     /// struct Handler;
     ///
-    /// impl EventHandler for Handler { }
+    /// impl EventHandler for Handler {}
     ///
     /// # async fn run() -> Result<(), Box<dyn std::error::Error>> {
     /// let token = std::env::var("DISCORD_TOKEN")?;
-    /// let mut client = Client::builder(&token).event_handler(Handler).await?;
+    /// let mut client =
+    ///     Client::builder(&token, GatewayIntents::default()).event_handler(Handler).await?;
     ///
     /// // restart shard ID 7
     /// client.shard_manager.lock().await.restart(ShardId(7)).await;
@@ -252,7 +255,7 @@ impl ShardManager {
     /// [`ShardRunner`]: super::ShardRunner
     #[instrument(skip(self))]
     pub async fn shards_instantiated(&self) -> Vec<ShardId> {
-        self.runners.lock().await.keys().cloned().collect()
+        self.runners.lock().await.keys().copied().collect()
     }
 
     /// Attempts to shut down the shard runner by Id.
@@ -266,13 +269,13 @@ impl ShardManager {
     /// know it should shut down. This _should never happen_. It may already be
     /// stopped.
     #[instrument(skip(self))]
-    #[allow(clippy::let_underscore_must_use)]
     pub async fn shutdown(&mut self, shard_id: ShardId, code: u16) {
+        const TIMEOUT: tokio::time::Duration = tokio::time::Duration::from_secs(5);
+
         info!("Shutting down shard {}", shard_id);
 
-        let _ = self.shard_queuer.unbounded_send(ShardQueuerMessage::ShutdownShard(shard_id, code));
+        drop(self.shard_queuer.unbounded_send(ShardQueuerMessage::ShutdownShard(shard_id, code)));
 
-        const TIMEOUT: tokio::time::Duration = tokio::time::Duration::from_secs(5);
         match timeout(TIMEOUT, self.shard_shutdown.next()).await {
             Ok(Some(shutdown_shard_id)) => {
                 if shutdown_shard_id != shard_id {
@@ -284,7 +287,7 @@ impl ShardManager {
             },
             Ok(None) => (),
             Err(why) => {
-                warn!("Failed to cleanly shutdown shard {}, reached timeout: {:?}", shard_id, why,)
+                warn!("Failed to cleanly shutdown shard {}, reached timeout: {:?}", shard_id, why);
             },
         }
 
@@ -297,7 +300,6 @@ impl ShardManager {
     /// If you only need to shutdown a select number of shards, prefer looping
     /// over the [`Self::shutdown`] method.
     #[instrument(skip(self))]
-    #[allow(clippy::let_underscore_must_use)]
     pub async fn shutdown_all(&mut self) {
         let keys = {
             let runners = self.runners.lock().await;
@@ -306,7 +308,7 @@ impl ShardManager {
                 return;
             }
 
-            runners.keys().cloned().collect::<Vec<_>>()
+            runners.keys().copied().collect::<Vec<_>>()
         };
 
         info!("Shutting down all shards");
@@ -315,8 +317,8 @@ impl ShardManager {
             self.shutdown(shard_id, 1000).await;
         }
 
-        let _ = self.shard_queuer.unbounded_send(ShardQueuerMessage::Shutdown);
-        let _ = self.monitor_tx.unbounded_send(ShardManagerMessage::ShutdownInitiated);
+        drop(self.shard_queuer.unbounded_send(ShardQueuerMessage::Shutdown));
+        drop(self.monitor_tx.unbounded_send(ShardManagerMessage::ShutdownInitiated));
     }
 
     #[instrument(skip(self))]
@@ -325,8 +327,7 @@ impl ShardManager {
 
         let msg = ShardQueuerMessage::Start(shard_info[0], shard_info[1]);
 
-        #[allow(clippy::let_underscore_must_use)]
-        let _ = self.shard_queuer.unbounded_send(msg);
+        drop(self.shard_queuer.unbounded_send(msg));
     }
 }
 
@@ -337,10 +338,9 @@ impl Drop for ShardManager {
     /// [`ShardQueuer`] to shutdown.
     ///
     /// [`ShardRunner`]: super::ShardRunner
-    #[allow(clippy::let_underscore_must_use)]
     fn drop(&mut self) {
-        let _ = self.shard_queuer.unbounded_send(ShardQueuerMessage::Shutdown);
-        let _ = self.monitor_tx.unbounded_send(ShardManagerMessage::ShutdownInitiated);
+        drop(self.shard_queuer.unbounded_send(ShardQueuerMessage::Shutdown));
+        drop(self.monitor_tx.unbounded_send(ShardManagerMessage::ShutdownInitiated));
     }
 }
 
@@ -349,7 +349,7 @@ pub struct ShardManagerOptions<'a> {
     pub event_handler: &'a Option<Arc<dyn EventHandler>>,
     pub raw_event_handler: &'a Option<Arc<dyn RawEventHandler>>,
     #[cfg(feature = "framework")]
-    pub framework: &'a Arc<Box<dyn Framework + Send + Sync>>,
+    pub framework: &'a Arc<dyn Framework + Send + Sync>,
     pub shard_index: u64,
     pub shard_init: u64,
     pub shard_total: u64,

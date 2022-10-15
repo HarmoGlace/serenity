@@ -7,16 +7,16 @@ determined if the change is something that the community wants.
 There are going to (usually) be 2 primary branches:
 
 - `current`: Development branch of the _most recent_ major version. For example,
-if the largest version is v0.10.2, then the v0.10.x series will be on this branch.
+if the largest version is v0.11.1, then the v0.11.x series will be on this branch.
 Bugfixes, internal rewrites, documentation updates, new features, etc. go here
 so long as they do not introduce breaking changes.
 
 - `next`: Development branch of the _next_ major version. Following the same
-example, this would be for the v0.11.x version series. This is where breaking
+example, this would be for the v0.12.x version series. This is where breaking
 changes go.
 
 We have a long-term support policy for the previous release series. If the _second
-most recent_ major version is v0.9.4, then the v0.9.x branch will be the place
+most recent_ major version is v0.10.10, then the v0.10.x branch will be the place
 for bugfixes. Fixes from `current` may be backported to this branch if needed.
 Occasionally, we might support two past release series for special reasons.
 
@@ -113,7 +113,15 @@ Improper commit summaries are:
 The first letter of the summary must be capitalised. The summary should also
 preferably fit into 50 characters, but this is not actively enforced.
 
+# Noisy commits
+
+Set `blame.ignoreRevsFile` to ignore [noise commits][noise-commits] in `git blame`:
+```
+git config blame.ignoreRevsFile .git-blame-ignore-revs
+```
+
 [test_ci]: .github/workflows/ci.yml
+[noise-commits]: https://github.com/serenity-rs/serenity/commit/9bbb25aac4d651804286f333eb503a72d41e473b
 [make]: https://github.com/sagiegurari/cargo-make
 [`rustup`]: https://rustup.rs
 [in-links]: https://github.com/rust-lang/rfcs/blob/master/text/1946-intra-rustdoc-links.md

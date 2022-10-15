@@ -1,16 +1,20 @@
 use std::collections::HashMap;
-
-use serde_json::Value;
+#[cfg(not(feature = "model"))]
+use std::marker::PhantomData;
 
 use super::{CreateAllowedMentions, CreateEmbed};
 use crate::builder::CreateComponents;
-use crate::model::interactions::InteractionApplicationCommandCallbackDataFlags;
-use crate::{http::AttachmentType, utils};
+use crate::json;
+use crate::json::prelude::*;
+use crate::model::application::interaction::MessageFlags;
+#[cfg(feature = "model")]
+use crate::model::channel::AttachmentType;
 
 #[derive(Clone, Debug, Default)]
 pub struct CreateInteractionResponseFollowup<'a>(
     pub HashMap<&'static str, Value>,
-    pub Vec<AttachmentType<'a>>,
+    #[cfg(feature = "model")] pub Vec<AttachmentType<'a>>,
+    #[cfg(not(feature = "model"))] PhantomData<&'a ()>,
 );
 
 impl<'a> CreateInteractionResponseFollowup<'a> {
@@ -23,7 +27,7 @@ impl<'a> CreateInteractionResponseFollowup<'a> {
     }
 
     fn _content(&mut self, content: String) -> &mut Self {
-        self.0.insert("content", Value::String(content));
+        self.0.insert("content", Value::from(content));
         self
     }
 
@@ -34,7 +38,7 @@ impl<'a> CreateInteractionResponseFollowup<'a> {
     }
 
     fn _username(&mut self, username: String) -> &mut Self {
-        self.0.insert("username", Value::String(username));
+        self.0.insert("username", Value::from(username));
         self
     }
 
@@ -45,7 +49,7 @@ impl<'a> CreateInteractionResponseFollowup<'a> {
     }
 
     fn _avatar(&mut self, avatar_url: String) -> &mut Self {
-        self.0.insert("avatar_url", Value::String(avatar_url));
+        self.0.insert("avatar_url", Value::from(avatar_url));
         self
     }
     /// Set whether the message is text-to-speech.
@@ -54,22 +58,24 @@ impl<'a> CreateInteractionResponseFollowup<'a> {
     ///
     /// Defaults to `false`.
     pub fn tts(&mut self, tts: bool) -> &mut Self {
-        self.0.insert("tts", Value::Bool(tts));
+        self.0.insert("tts", Value::from(tts));
         self
     }
 
     /// Appends a file to the message.
+    #[cfg(feature = "model")]
     pub fn add_file<T: Into<AttachmentType<'a>>>(&mut self, file: T) -> &mut Self {
         self.1.push(file.into());
         self
     }
 
     /// Appends a list of files to the message.
+    #[cfg(feature = "model")]
     pub fn add_files<T: Into<AttachmentType<'a>>, It: IntoIterator<Item = T>>(
         &mut self,
         files: It,
     ) -> &mut Self {
-        self.1.extend(files.into_iter().map(|f| f.into()));
+        self.1.extend(files.into_iter().map(Into::into));
         self
     }
 
@@ -77,16 +83,17 @@ impl<'a> CreateInteractionResponseFollowup<'a> {
     ///
     /// Calling this multiple times will overwrite the file list.
     /// To append files, call [`Self::add_file`] or [`Self::add_files`] instead.
+    #[cfg(feature = "model")]
     pub fn files<T: Into<AttachmentType<'a>>, It: IntoIterator<Item = T>>(
         &mut self,
         files: It,
     ) -> &mut Self {
-        self.1 = files.into_iter().map(|f| f.into()).collect();
+        self.1 = files.into_iter().map(Into::into).collect();
         self
     }
 
     /// Create an embed for the message.
-    pub fn create_embed<F>(&mut self, f: F) -> &mut Self
+    pub fn embed<F>(&mut self, f: F) -> &mut Self
     where
         F: FnOnce(&mut CreateEmbed) -> &mut CreateEmbed,
     {
@@ -97,15 +104,36 @@ impl<'a> CreateInteractionResponseFollowup<'a> {
 
     /// Adds an embed to the message.
     pub fn add_embed(&mut self, embed: CreateEmbed) -> &mut Self {
-        let map = utils::hashmap_to_json_map(embed.0);
-        let embed = Value::Object(map);
+        let map = json::hashmap_to_json_map(embed.0);
+        let embed = Value::from(map);
 
         self.0
             .entry("embeds")
-            .or_insert_with(|| Value::Array(Vec::new()))
+            .or_insert_with(|| Value::from(Vec::<Value>::new()))
             .as_array_mut()
-            .unwrap()
+            .expect("couldn't add embed")
             .push(embed);
+
+        self
+    }
+
+    /// Adds multiple embeds to the message.
+    pub fn add_embeds(&mut self, embeds: Vec<CreateEmbed>) -> &mut Self {
+        for embed in embeds {
+            self.add_embed(embed);
+        }
+
+        self
+    }
+
+    /// Sets a single embed to include in the message
+    ///
+    /// Calling this will overwrite the embed list.
+    /// To append embeds, call [`Self::add_embed`] instead.
+    pub fn set_embed(&mut self, embed: CreateEmbed) -> &mut Self {
+        let map = json::hashmap_to_json_map(embed.0);
+        let embed = Value::from(map);
+        self.0.insert("embeds", Value::from(vec![embed]));
 
         self
     }
@@ -114,11 +142,13 @@ impl<'a> CreateInteractionResponseFollowup<'a> {
     ///
     /// Calling this multiple times will overwrite the embed list.
     /// To append embeds, call [`Self::add_embed`] instead.
-    pub fn embeds(&mut self, embeds: impl IntoIterator<Item = CreateEmbed>) -> &mut Self {
-        let embeds =
-            embeds.into_iter().map(|embed| utils::hashmap_to_json_map(embed.0).into()).collect();
+    pub fn set_embeds(&mut self, embeds: impl IntoIterator<Item = CreateEmbed>) -> &mut Self {
+        let embeds = embeds
+            .into_iter()
+            .map(|embed| json::hashmap_to_json_map(embed.0).into())
+            .collect::<Vec<Value>>();
 
-        self.0.insert("embeds", Value::Array(embeds));
+        self.0.insert("embeds", Value::from(embeds));
         self
     }
 
@@ -129,16 +159,34 @@ impl<'a> CreateInteractionResponseFollowup<'a> {
     {
         let mut allowed_mentions = CreateAllowedMentions::default();
         f(&mut allowed_mentions);
-        let map = utils::hashmap_to_json_map(allowed_mentions.0);
-        let allowed_mentions = Value::Object(map);
+        let map = json::hashmap_to_json_map(allowed_mentions.0);
+        let allowed_mentions = Value::from(map);
 
         self.0.insert("allowed_mentions", allowed_mentions);
         self
     }
 
     /// Sets the flags for the response.
-    pub fn flags(&mut self, flags: InteractionApplicationCommandCallbackDataFlags) -> &mut Self {
-        self.0.insert("flags", Value::Number(serde_json::Number::from(flags.bits())));
+    pub fn flags(&mut self, flags: MessageFlags) -> &mut Self {
+        self.0.insert("flags", from_number(flags.bits()));
+        self
+    }
+
+    /// Adds or removes the ephemeral flag
+    pub fn ephemeral(&mut self, ephemeral: bool) -> &mut Self {
+        let flags = self
+            .0
+            .get("flags")
+            .map_or(0, |f| f.as_u64().expect("Interaction response flag was not a number"));
+
+        let flags = if ephemeral {
+            flags | MessageFlags::EPHEMERAL.bits()
+        } else {
+            flags & !MessageFlags::EPHEMERAL.bits()
+        };
+
+        self.0.insert("flags", from_number(flags));
+
         self
     }
 
@@ -150,13 +198,13 @@ impl<'a> CreateInteractionResponseFollowup<'a> {
         let mut components = CreateComponents::default();
         f(&mut components);
 
-        self.0.insert("components", Value::Array(components.0));
+        self.0.insert("components", Value::from(components.0));
         self
     }
 
     /// Sets the components of this message.
     pub fn set_components(&mut self, components: CreateComponents) -> &mut Self {
-        self.0.insert("components", Value::Array(components.0));
+        self.0.insert("components", Value::from(components.0));
         self
     }
 }

@@ -1,9 +1,7 @@
 //! Models relating to guilds and types that it owns.
 
-// FIXME: Remove after the removal of the `̀nsfw` field and the `GuildEmbed` structure.
-#![allow(deprecated)]
-
-mod audit_log;
+pub mod audit_log;
+pub mod automod;
 mod emoji;
 mod guild_id;
 mod guild_preview;
@@ -12,19 +10,20 @@ mod member;
 mod partial_guild;
 mod premium_tier;
 mod role;
+mod scheduled_event;
 mod system_channel;
+mod welcome_screen;
 
-use chrono::{DateTime, Utc};
+#[cfg(feature = "model")]
 use futures::stream::StreamExt;
 use serde::de::Error as DeError;
-use serde::{Serialize, Serializer};
-#[cfg(all(feature = "http", feature = "model"))]
-use serde_json::json;
 #[cfg(feature = "model")]
 use tracing::error;
 #[cfg(all(feature = "model", feature = "cache"))]
 use tracing::warn;
 
+#[doc(hidden)]
+#[deprecated(note = "import the types from the `audit_log` module")]
 pub use self::audit_log::*;
 pub use self::emoji::*;
 pub use self::guild_id::*;
@@ -34,16 +33,27 @@ pub use self::member::*;
 pub use self::partial_guild::*;
 pub use self::premium_tier::*;
 pub use self::role::*;
+pub use self::scheduled_event::*;
 pub use self::system_channel::*;
+pub use self::welcome_screen::*;
 use super::utils::*;
 #[cfg(feature = "model")]
 use crate::builder::{
+    AddMember,
+    CreateApplicationCommand,
+    CreateApplicationCommandPermissionsData,
+    CreateApplicationCommands,
     CreateChannel,
+    CreateScheduledEvent,
+    CreateSticker,
+    EditAutoModRule,
     EditGuild,
     EditGuildWelcomeScreen,
     EditGuildWidget,
     EditMember,
     EditRole,
+    EditScheduledEvent,
+    EditSticker,
 };
 #[cfg(all(feature = "cache", feature = "model"))]
 use crate::cache::Cache;
@@ -59,20 +69,20 @@ use crate::collector::{
 #[cfg(feature = "model")]
 use crate::constants::LARGE_THRESHOLD;
 #[cfg(feature = "model")]
-use crate::http::{CacheHttp, Http};
+use crate::http::{CacheHttp, Http, UserPagination};
+use crate::json::prelude::*;
+use crate::json::{from_number, from_value};
+#[cfg(feature = "model")]
+use crate::model::application::command::{Command, CommandPermission};
+#[cfg(feature = "model")]
+use crate::model::guild::automod::Rule;
 use crate::model::prelude::*;
-#[cfg(all(feature = "model", feature = "unstable_discord_api"))]
-use crate::{
-    builder::{
-        CreateApplicationCommand,
-        CreateApplicationCommandPermissionsData,
-        CreateApplicationCommands,
-        CreateApplicationCommandsPermissions,
-    },
-    model::interactions::application_command::{ApplicationCommand, ApplicationCommandPermission},
-};
+use crate::model::utils::{emojis, presences, roles, stickers};
+use crate::model::Timestamp;
 
 /// A representation of a banning of a user.
+///
+/// [Discord docs](https://discord.com/developers/docs/resources/guild#ban-object).
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Hash, Serialize)]
 pub struct Ban {
     /// The reason given for this ban.
@@ -82,6 +92,9 @@ pub struct Ban {
 }
 
 /// Information about a Discord guild, such as channels, emojis, etc.
+///
+/// [Discord docs](https://discord.com/developers/docs/resources/guild#guild-object) plus
+/// [extension](https://discord.com/developers/docs/topics/gateway#guild-create).
 #[derive(Clone, Debug, Serialize)]
 #[non_exhaustive]
 pub struct Guild {
@@ -96,13 +109,13 @@ pub struct Guild {
     ///
     /// This contains all channels regardless of permissions (i.e. the ability
     /// of the bot to read from or connect to them).
-    #[serde(serialize_with = "serialize_gen_map")]
-    pub channels: HashMap<ChannelId, GuildChannel>,
+    #[serde(serialize_with = "serialize_map_values")]
+    pub channels: HashMap<ChannelId, Channel>,
     /// Indicator of whether notifications for all messages are enabled by
     /// default in the guild.
     pub default_message_notifications: DefaultMessageNotificationLevel,
     /// All of the guild's custom emojis.
-    #[serde(serialize_with = "serialize_gen_map")]
+    #[serde(serialize_with = "serialize_map_values")]
     pub emojis: HashMap<EmojiId, Emoji>,
     /// Default explicit content filter level.
     pub explicit_content_filter: ExplicitContentFilter,
@@ -119,9 +132,16 @@ pub struct Guild {
     /// - `FEATURABLE`
     /// - `INVITE_SPLASH`
     /// - `MEMBER_VERIFICATION_GATE_ENABLED`
+    /// - `MONETIZATION_ENABLED`
+    /// - `MORE_STICKERS`
     /// - `NEWS`
     /// - `PARTNERED`
     /// - `PREVIEW_ENABLED`
+    /// - `PRIVATE_THREADS`
+    /// - `ROLE_ICONS`
+    /// - `SEVEN_DAY_THREAD_ARCHIVE`
+    /// - `THREE_DAY_THREAD_ARCHIVE`
+    /// - `TICKETED_EVENTS_ENABLED`
     /// - `VANITY_URL`
     /// - `VERIFIED`
     /// - `VIP_REGIONS`
@@ -139,11 +159,10 @@ pub struct Guild {
     pub icon: Option<String>,
     /// The unique Id identifying the guild.
     ///
-    /// This is equivilant to the Id of the default role (`@everyone`) and also
-    /// that of the default channel (typically `#general`).
+    /// This is equivalent to the Id of the default role (`@everyone`).
     pub id: GuildId,
     /// The date that the current user joined the guild.
-    pub joined_at: DateTime<Utc>,
+    pub joined_at: Timestamp,
     /// Indicator of whether the guild is considered "large" by Discord.
     pub large: bool,
     /// The number of members in the guild.
@@ -153,7 +172,7 @@ pub struct Guild {
     /// Members might not all be available when the [`ReadyEvent`] is received
     /// if the [`Self::member_count`] is greater than the [`LARGE_THRESHOLD`] set by
     /// the library.
-    #[serde(serialize_with = "serialize_gen_map")]
+    #[serde(serialize_with = "serialize_map_values")]
     pub members: HashMap<UserId, Member>,
     /// Indicator of whether the guild requires multi-factor authentication for
     /// [`Role`]s or [`User`]s with moderation permissions.
@@ -166,13 +185,10 @@ pub struct Guild {
     ///
     /// **Note**: This will be empty unless the "guild presences" privileged
     /// intent is enabled.
-    #[serde(serialize_with = "serialize_gen_map")]
+    #[serde(serialize_with = "serialize_map_values")]
     pub presences: HashMap<UserId, Presence>,
-    /// The region that the voice servers that the guild uses are located in.
-    #[deprecated(note = "Regions are now set per voice channel instead of globally.")]
-    pub region: String,
     /// A mapping of the guild's roles.
-    #[serde(serialize_with = "serialize_gen_map")]
+    #[serde(serialize_with = "serialize_map_values")]
     pub roles: HashMap<RoleId, Role>,
     /// An identifying hash of the guild's splash icon.
     ///
@@ -199,7 +215,7 @@ pub struct Guild {
     /// Indicator of the current verification level of the guild.
     pub verification_level: VerificationLevel,
     /// A mapping of [`User`]s to their current voice state.
-    #[serde(serialize_with = "serialize_gen_map")]
+    #[serde(serialize_with = "serialize_map_values")]
     pub voice_states: HashMap<UserId, VoiceState>,
     /// The server's description, if it has one.
     pub description: Option<String>,
@@ -224,12 +240,6 @@ pub struct Guild {
     pub approximate_member_count: Option<u64>,
     /// Approximate number of non-offline members in this guild.
     pub approximate_presence_count: Option<u64>,
-    /// Whether or not this guild is designated as NSFW. See [`discord support article`].
-    ///
-    /// [`discord support article`]: https://support.discord.com/hc/en-us/articles/1500005389362-NSFW-Server-Designation
-    #[deprecated(note = "Removed in favor of Guild::nsfw_level.")]
-    #[serde(default)]
-    pub nsfw: bool,
     /// The guild NSFW state. See [`discord support article`].
     ///
     /// [`discord support article`]: https://support.discord.com/hc/en-us/articles/1500005389362-NSFW-Server-Designation
@@ -252,15 +262,125 @@ pub struct Guild {
     /// All active threads in this guild that current user has permission to view.
     #[serde(default)]
     pub threads: Vec<GuildChannel>,
+    /// All of the guild's custom stickers.
+    #[serde(serialize_with = "serialize_map_values")]
+    pub stickers: HashMap<StickerId, Sticker>,
 }
 
 #[cfg(feature = "model")]
 impl Guild {
-    #[cfg(feature = "cache")]
-    async fn check_hierarchy(&self, cache: impl AsRef<Cache>, other_user: UserId) -> Result<()> {
-        let current_id = cache.as_ref().current_user().await.id;
+    /// Gets all auto moderation [`Rule`]s of this guild via HTTP.
+    ///
+    /// **Note**: Requires the [Manage Guild] permission.
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`Error::Http`] if the guild is unavailable.
+    ///
+    /// [Manage Guild]: Permissions::MANAGE_GUILD
+    #[inline]
+    pub async fn automod_rules(self, http: impl AsRef<Http>) -> Result<Vec<Rule>> {
+        self.id.automod_rules(http).await
+    }
 
-        if let Some(higher) = self.greater_member_hierarchy(&cache, other_user, current_id).await {
+    /// Gets an auto moderation [`Rule`] of this guild by its ID via HTTP.
+    ///
+    /// **Note**: Requires the [Manage Guild] permission.
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`Error::Http`] if a rule with the given ID does not exist.
+    ///
+    /// [Manage Guild]: Permissions::MANAGE_GUILD
+    #[inline]
+    pub async fn automod_rule(
+        self,
+        http: impl AsRef<Http>,
+        rule_id: impl Into<RuleId>,
+    ) -> Result<Rule> {
+        self.id.automod_rule(http, rule_id).await
+    }
+
+    /// Creates an auto moderation [`Rule`] in the guild.
+    ///
+    /// **Note**: Requires the [Manage Guild] permission.
+    ///
+    /// # Examples
+    ///
+    /// Create a custom keyword filter to block the message and timeout the author.
+    ///
+    /// ```ignore
+    /// use serenity::model::guild::automod::{Action, Trigger};
+    /// use serenity::model::id::GuildId;
+    ///
+    /// let _rule = guild
+    ///     .create_automod_rule(&http, |r| {
+    ///         r.name("foobar filter")
+    ///             .trigger(Trigger::Keyword(vec!["foo*".to_string(), "*bar".to_string()]))
+    ///             .actions(vec![Action::BlockMessage, Action::Timeout(60)])
+    ///     })
+    ///     .await;
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Http`] if the current user lacks permission,
+    /// or if invalid values are set.
+    ///
+    /// [Manage Guild]: Permissions::MANAGE_GUILD
+    #[inline]
+    pub async fn create_automod_rule(
+        self,
+        http: impl AsRef<Http>,
+        f: impl FnOnce(&mut EditAutoModRule) -> &mut EditAutoModRule,
+    ) -> Result<Rule> {
+        self.id.create_automod_rule(http, f).await
+    }
+
+    /// Edit an auto moderation [`Rule`] by its ID.
+    ///
+    /// **Note**: Requires the [Manage Guild] permission.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Http`] if the current user lacks permission,
+    /// or if invalid values are set.
+    ///
+    /// [Manage Guild]: Permissions::MANAGE_GUILD
+    #[inline]
+    pub async fn edit_automod_rule(
+        self,
+        http: impl AsRef<Http>,
+        rule_id: impl Into<RuleId>,
+        f: impl FnOnce(&mut EditAutoModRule) -> &mut EditAutoModRule,
+    ) -> Result<Rule> {
+        self.id.edit_automod_rule(http, rule_id, f).await
+    }
+
+    /// Deletes an auto moderation [`Rule`] from the guild.
+    ///
+    /// **Note**: Requires the [Manage Guild] permission.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Http`] if the current user lacks permission,
+    /// or if a rule with that Id does not exist.
+    ///
+    /// [Manage Guild]: Permissions::MANAGE_GUILD
+    #[inline]
+    pub async fn delete_automod_rule(
+        self,
+        http: impl AsRef<Http>,
+        rule_id: impl Into<RuleId>,
+    ) -> Result<()> {
+        self.id.delete_automod_rule(http, rule_id).await
+    }
+
+    #[cfg(feature = "cache")]
+    fn check_hierarchy(&self, cache: impl AsRef<Cache>, other_user: UserId) -> Result<()> {
+        let current_id = cache.as_ref().current_user().id;
+
+        if let Some(higher) = self.greater_member_hierarchy(&cache, other_user, current_id) {
             if higher != current_id {
                 return Err(Error::Model(ModelError::Hierarchy));
             }
@@ -272,11 +392,14 @@ impl Guild {
     /// Returns the "default" channel of the guild for the passed user id.
     /// (This returns the first channel that can be read by the user, if there isn't one,
     /// returns [`None`])
+    #[allow(clippy::unused_async)]
     pub async fn default_channel(&self, uid: UserId) -> Option<&GuildChannel> {
         let member = self.members.get(&uid)?;
         for channel in self.channels.values() {
-            if self.user_permissions_in(channel, member).ok()?.read_messages() {
-                return Some(channel);
+            if let Channel::Guild(channel) = channel {
+                if self.user_permissions_in(channel, member).ok()?.view_channel() {
+                    return Some(channel);
+                }
             }
         }
 
@@ -289,10 +412,16 @@ impl Guild {
     ///
     /// **Note**: This is very costly if used in a server with lots of channels,
     /// members, or both.
-    pub async fn default_channel_guaranteed(&self) -> Option<&GuildChannel> {
+    #[must_use]
+    pub fn default_channel_guaranteed(&self) -> Option<&GuildChannel> {
         for channel in self.channels.values() {
-            for member in self.members.values() {
-                if self.user_permissions_in(channel, member).ok()?.read_messages() {
+            if let Channel::Guild(channel) = channel {
+                if self
+                    .members
+                    .values()
+                    .filter_map(|member| self.user_permissions_in(channel, member).ok())
+                    .all(Permissions::view_channel)
+                {
                     return Some(channel);
                 }
             }
@@ -304,7 +433,7 @@ impl Guild {
     #[cfg(feature = "cache")]
     async fn has_perms(&self, cache_http: impl CacheHttp, mut permissions: Permissions) -> bool {
         if let Some(cache) = cache_http.cache() {
-            let user_id = cache.current_user().await.id;
+            let user_id = cache.current_user().id;
 
             if let Ok(perms) = self.member_permissions(&cache_http, user_id).await {
                 permissions.remove(perms);
@@ -319,15 +448,17 @@ impl Guild {
     }
 
     #[cfg(feature = "cache")]
-    pub async fn channel_id_from_name(
+    pub fn channel_id_from_name(
         &self,
         cache: impl AsRef<Cache>,
         name: impl AsRef<str>,
     ) -> Option<ChannelId> {
         let name = name.as_ref();
-        let guild_channels = cache.as_ref().guild_channels(&self.id).await?;
+        let guild_channels = cache.as_ref().guild_channels(&self.id)?;
 
-        for (id, channel) in guild_channels.iter() {
+        for channel_entry in guild_channels.iter() {
+            let (id, channel) = channel_entry.pair();
+
             if channel.name == name {
                 return Some(*id);
             }
@@ -408,7 +539,7 @@ impl Guild {
                     return Err(Error::Model(ModelError::InvalidPermissions(req)));
                 }
 
-                self.check_hierarchy(cache, user).await?;
+                self.check_hierarchy(cache, user)?;
             }
         }
 
@@ -416,10 +547,9 @@ impl Guild {
     }
 
     /// Returns the formatted URL of the guild's banner image, if one exists.
+    #[must_use]
     pub fn banner_url(&self) -> Option<String> {
-        self.banner
-            .as_ref()
-            .map(|banner| format!(cdn!("/banners/{}/{}.webp?size=1024"), self.id, banner))
+        self.banner.as_ref().map(|banner| cdn!("/banners/{}/{}.webp?size=1024", self.id, banner))
     }
 
     /// Retrieves a list of [`Ban`]s for the guild.
@@ -445,6 +575,24 @@ impl Guild {
         }
 
         self.id.bans(cache_http.http()).await
+    }
+
+    /// Adds a [`User`] to this guild with a valid OAuth2 access token.
+    ///
+    /// Returns the created [`Member`] object, or nothing if the user is already a member of the guild.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Http`] if the current user lacks permission,
+    /// or if invalid values are set.
+    #[inline]
+    pub async fn add_member(
+        &self,
+        http: impl AsRef<Http>,
+        user_id: impl Into<UserId>,
+        f: impl FnOnce(&mut AddMember) -> &mut AddMember,
+    ) -> Result<Option<Member>> {
+        self.id.add_member(http, user_id, f).await
     }
 
     /// Retrieves a list of [`AuditLogs`] for the guild.
@@ -497,9 +645,9 @@ impl Guild {
     /// Create a guild called `"test"` in the [US West region] with no icon:
     ///
     /// ```rust,ignore
-    /// use serenity::model::{Guild, Region};
+    /// use serenity::model::Guild;
     ///
-    /// let _guild = Guild::create_guild(&http, "test", Region::UsWest, None).await;
+    /// let _guild = Guild::create_guild(&http, "test", None).await;
     /// ```
     ///
     /// # Errors
@@ -507,18 +655,15 @@ impl Guild {
     /// Returns [`Error::Http`] if the current user cannot create a Guild.
     ///
     /// [`Shard`]: crate::gateway::Shard
-    /// [US West region]: Region::UsWest
     /// [whitelist]: https://discord.com/developers/docs/resources/guild#create-guild
     pub async fn create(
         http: impl AsRef<Http>,
         name: &str,
-        region: Region,
         icon: Option<&str>,
     ) -> Result<PartialGuild> {
         let map = json!({
             "icon": icon,
             "name": name,
-            "region": region.name(),
         });
 
         http.as_ref().create_guild(&map).await
@@ -575,7 +720,7 @@ impl Guild {
     /// The name of the emoji must be at least 2 characters long and can only
     /// contain alphanumeric characters and underscores.
     ///
-    /// Requires the [Manage Emojis] permission.
+    /// Requires the [Manage Emojis and Stickers] permission.
     ///
     /// # Examples
     ///
@@ -589,7 +734,7 @@ impl Guild {
     ///
     /// [`EditProfile::avatar`]: crate::builder::EditProfile::avatar
     /// [`utils::read_image`]: crate::utils::read_image
-    /// [Manage Emojis]: Permissions::MANAGE_EMOJIS
+    /// [Manage Emojis and Stickers]: Permissions::MANAGE_EMOJIS_AND_STICKERS
     #[inline]
     pub async fn create_emoji(
         &self,
@@ -619,24 +764,20 @@ impl Guild {
         self.id.create_integration(&http, integration_id, kind).await
     }
 
-    /// Creates a guild specific [`ApplicationCommand`]
+    /// Creates a guild specific [`Command`]
     ///
-    /// **Note**: Unlike global `ApplicationCommand`s, guild commands will update instantly.
+    /// **Note**: Unlike global `Command`s, guild commands will update instantly.
     ///
     /// # Errors
     ///
     /// Returns the same possible errors as `create_global_application_command`.
-    ///
-    /// [`ApplicationCommand`]: crate::model::interactions::application_command::ApplicationCommand
-    #[cfg(feature = "unstable_discord_api")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "unstable_discord_api")))]
     #[allow(clippy::missing_errors_doc)]
     #[inline]
     pub async fn create_application_command<F>(
         &self,
         http: impl AsRef<Http>,
         f: F,
-    ) -> Result<ApplicationCommand>
+    ) -> Result<Command>
     where
         F: FnOnce(&mut CreateApplicationCommand) -> &mut CreateApplicationCommand,
     {
@@ -646,32 +787,34 @@ impl Guild {
     /// Overrides all guild application commands.
     ///
     /// [`create_application_command`]: Self::create_application_command
-    #[cfg(feature = "unstable_discord_api")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "unstable_discord_api")))]
+    ///
+    /// # Errors
+    ///
+    /// If there is an error, it will be either [`Error::Http`] or [`Error::Json`].
     pub async fn set_application_commands<F>(
         &self,
         http: impl AsRef<Http>,
         f: F,
-    ) -> Result<Vec<ApplicationCommand>>
+    ) -> Result<Vec<Command>>
     where
         F: FnOnce(&mut CreateApplicationCommands) -> &mut CreateApplicationCommands,
     {
         self.id.set_application_commands(http, f).await
     }
 
-    /// Creates a guild specific [`ApplicationCommandPermission`].
+    /// Creates a guild specific [`CommandPermission`].
     ///
     /// **Note**: It will update instantly.
     ///
-    /// [`ApplicationCommandPermission`]: crate::model::interactions::application_command::ApplicationCommandPermission
-    #[cfg(feature = "unstable_discord_api")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "unstable_discord_api")))]
+    /// # Errors
+    ///
+    /// If there is an error, it will be either [`Error::Http`] or [`Error::Json`].
     pub async fn create_application_command_permission<F>(
         &self,
         http: impl AsRef<Http>,
         command_id: CommandId,
         f: F,
-    ) -> Result<ApplicationCommandPermission>
+    ) -> Result<CommandPermission>
     where
         F: FnOnce(
             &mut CreateApplicationCommandPermissionsData,
@@ -681,51 +824,58 @@ impl Guild {
     }
 
     /// Overrides all application commands permissions.
-    #[cfg(feature = "unstable_discord_api")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "unstable_discord_api")))]
+    ///
+    /// # Errors
+    ///
+    /// If there is an error, it will be either [`Error::Http`] or [`Error::Json`].
+    #[deprecated(note = "use `create_appliction_command_permission`.")]
+    #[allow(deprecated)]
     pub async fn set_application_commands_permissions<F>(
         &self,
         http: impl AsRef<Http>,
         f: F,
-    ) -> Result<Vec<ApplicationCommandPermission>>
+    ) -> Result<Vec<CommandPermission>>
     where
         F: FnOnce(
-            &mut CreateApplicationCommandsPermissions,
-        ) -> &mut CreateApplicationCommandsPermissions,
+            &mut crate::builder::CreateApplicationCommandsPermissions,
+        ) -> &mut crate::builder::CreateApplicationCommandsPermissions,
     {
         self.id.set_application_commands_permissions(http, f).await
     }
 
     /// Get all guild application commands.
-    #[cfg(feature = "unstable_discord_api")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "unstable_discord_api")))]
-    pub async fn get_application_commands(
-        &self,
-        http: impl AsRef<Http>,
-    ) -> Result<Vec<ApplicationCommand>> {
+    ///
+    /// # Errors
+    ///
+    /// If there is an error, it will be either [`Error::Http`] or [`Error::Json`].
+    pub async fn get_application_commands(&self, http: impl AsRef<Http>) -> Result<Vec<Command>> {
         self.id.get_application_commands(http).await
     }
 
     /// Get a specific guild application command by its Id.
-    #[cfg(feature = "unstable_discord_api")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "unstable_discord_api")))]
+    ///
+    /// # Errors
+    ///
+    /// If there is an error, it will be either [`Error::Http`] or [`Error::Json`].
     pub async fn get_application_command(
         &self,
         http: impl AsRef<Http>,
         command_id: CommandId,
-    ) -> Result<ApplicationCommand> {
+    ) -> Result<Command> {
         self.id.get_application_command(http, command_id).await
     }
 
     /// Edit guild application command by its Id.
-    #[cfg(feature = "unstable_discord_api")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "unstable_discord_api")))]
+    ///
+    /// # Errors
+    ///
+    /// If there is an error, it will be either [`Error::Http`] or [`Error::Json`].
     pub async fn edit_application_command<F>(
         &self,
         http: impl AsRef<Http>,
         command_id: CommandId,
         f: F,
-    ) -> Result<ApplicationCommand>
+    ) -> Result<Command>
     where
         F: FnOnce(&mut CreateApplicationCommand) -> &mut CreateApplicationCommand,
     {
@@ -733,8 +883,10 @@ impl Guild {
     }
 
     /// Delete guild application command by its Id.
-    #[cfg(feature = "unstable_discord_api")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "unstable_discord_api")))]
+    ///
+    /// # Errors
+    ///
+    /// If there is an error, it will be either [`Error::Http`] or [`Error::Json`].
     pub async fn delete_application_command(
         &self,
         http: impl AsRef<Http>,
@@ -744,23 +896,27 @@ impl Guild {
     }
 
     /// Get all guild application commands permissions only.
-    #[cfg(feature = "unstable_discord_api")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "unstable_discord_api")))]
+    ///
+    /// # Errors
+    ///
+    /// If there is an error, it will be either [`Error::Http`] or [`Error::Json`].
     pub async fn get_application_commands_permissions(
         &self,
         http: impl AsRef<Http>,
-    ) -> Result<Vec<ApplicationCommandPermission>> {
+    ) -> Result<Vec<CommandPermission>> {
         self.id.get_application_commands_permissions(http).await
     }
 
     /// Get permissions for specific guild application command by its Id.
-    #[cfg(feature = "unstable_discord_api")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "unstable_discord_api")))]
+    ///
+    /// # Errors
+    ///
+    /// If there is an error, it will be either [`Error::Http`] or [`Error::Json`].
     pub async fn get_application_command_permissions(
         &self,
         http: impl AsRef<Http>,
         command_id: CommandId,
-    ) -> Result<ApplicationCommandPermission> {
+    ) -> Result<CommandPermission> {
         self.id.get_application_command_permissions(http, command_id).await
     }
 
@@ -805,6 +961,68 @@ impl Guild {
         self.id.create_role(cache_http.http(), f).await
     }
 
+    /// Creates a new scheduled event in the guild with the data set, if any.
+    ///
+    /// **Note**: Requires the [Manage Events] permission.
+    ///
+    /// # Errors
+    ///
+    /// If the `cache` is enabled, returns a [`ModelError::InvalidPermissions`] if the current user
+    /// does not have permission to manage scheduled events.
+    ///
+    /// Otherwise will return [`Error::Http`] if the current user does not have permission.
+    ///
+    /// [Manage Events]: Permissions::MANAGE_EVENTS
+    pub async fn create_scheduled_event<F>(
+        &self,
+        cache_http: impl CacheHttp,
+        f: F,
+    ) -> Result<ScheduledEvent>
+    where
+        F: FnOnce(&mut CreateScheduledEvent) -> &mut CreateScheduledEvent,
+    {
+        #[cfg(feature = "cache")]
+        {
+            if cache_http.cache().is_some() {
+                let req = Permissions::MANAGE_EVENTS;
+
+                if !self.has_perms(&cache_http, req).await {
+                    return Err(Error::Model(ModelError::InvalidPermissions(req)));
+                }
+            }
+        }
+
+        self.id.create_scheduled_event(cache_http.http(), f).await
+    }
+
+    /// Creates a new sticker in the guild with the data set, if any.
+    ///
+    /// **Note**: Requires the [Manage Emojis and Stickers] permission.
+    ///
+    /// # Errors
+    ///
+    /// If the `cache` is enabled, returns a [`ModelError::InvalidPermissions`]
+    /// if the current user does not have permission to manage roles.
+    ///
+    /// [Manage Emojis and Stickers]: crate::model::permissions::Permissions::MANAGE_EMOJIS_AND_STICKERS
+    pub async fn create_sticker<'a, F>(&self, cache_http: impl CacheHttp, f: F) -> Result<Sticker>
+    where
+        for<'b> F: FnOnce(&'b mut CreateSticker<'a>) -> &'b mut CreateSticker<'a>,
+    {
+        #[cfg(feature = "cache")]
+        {
+            if cache_http.cache().is_some() {
+                let req = Permissions::MANAGE_EMOJIS_AND_STICKERS;
+
+                if !self.has_perms(&cache_http, req).await {
+                    return Err(Error::Model(ModelError::InvalidPermissions(req)));
+                }
+            }
+        }
+
+        self.id.create_sticker(cache_http.http(), f).await
+    }
+
     /// Deletes the current guild if the current user is the owner of the
     /// guild.
     ///
@@ -821,7 +1039,7 @@ impl Guild {
         #[cfg(feature = "cache")]
         {
             if let Some(cache) = cache_http.cache() {
-                if self.owner_id != cache.current_user().await.id {
+                if self.owner_id != cache.current_user().id {
                     let req = Permissions::MANAGE_GUILD;
 
                     return Err(Error::Model(ModelError::InvalidPermissions(req)));
@@ -834,13 +1052,13 @@ impl Guild {
 
     /// Deletes an [`Emoji`] from the guild.
     ///
-    /// Requires the [Manage Emojis] permission.
+    /// Requires the [Manage Emojis and Stickers] permission.
     ///
     /// # Errors
     ///
     /// Returns [`Error::Http`] if the current user lacks permission.
     ///
-    /// [Manage Emojis]: Permissions::MANAGE_EMOJIS
+    /// [Manage Emojis and Stickers]: Permissions::MANAGE_EMOJIS_AND_STICKERS
     #[inline]
     pub async fn delete_emoji(
         &self,
@@ -889,6 +1107,44 @@ impl Guild {
         role_id: impl Into<RoleId>,
     ) -> Result<()> {
         self.id.delete_role(&http, role_id).await
+    }
+
+    /// Deletes a [Scheduled Event] by Id from the guild.
+    ///
+    /// Requires the [Manage Events] permission.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Http`] if the current user lacks permission to delete the scheduled event.
+    ///
+    /// [Scheduled Event]: ScheduledEvent
+    /// [Manage Events]: Permissions::MANAGE_EVENTS
+    #[inline]
+    pub async fn delete_scheduled_event(
+        &self,
+        http: impl AsRef<Http>,
+        event_id: impl Into<ScheduledEventId>,
+    ) -> Result<()> {
+        self.id.delete_scheduled_event(&http, event_id).await
+    }
+
+    /// Deletes a [`Sticker`] by Id from the guild.
+    ///
+    /// Requires the [Manage Emojis and Stickers] permission.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Http`] if the current user lacks permission
+    /// to delete the sticker.
+    ///
+    /// [Manage Emojis and Stickers]: crate::model::permissions::Permissions::MANAGE_EMOJIS_AND_STICKERS
+    #[inline]
+    pub async fn delete_sticker(
+        &self,
+        http: impl AsRef<Http>,
+        sticker_id: impl Into<StickerId>,
+    ) -> Result<()> {
+        self.id.delete_sticker(&http, sticker_id).await
     }
 
     /// Edits the current guild with new data where specified.
@@ -947,12 +1203,6 @@ impl Guild {
                 self.mfa_level = guild.mfa_level;
                 self.name = guild.name;
                 self.owner_id = guild.owner_id;
-
-                #[allow(deprecated)]
-                {
-                    self.region = guild.region;
-                }
-
                 self.roles = guild.roles;
                 self.splash = guild.splash;
                 self.verification_level = guild.verification_level;
@@ -968,14 +1218,13 @@ impl Guild {
     /// Also see [`Emoji::edit`] if you have the `cache` and `model` features
     /// enabled.
     ///
-    /// Requires the [Manage Emojis] permission.
+    /// Requires the [Manage Emojis and Stickers] permission.
     ///
     /// # Errors
     ///
     /// Returns [`Error::Http`] if the current user lacks permission.
     ///
-    /// [Manage Emojis]: Permissions::MANAGE_EMOJIS
-    /// [`Error::Http`]: crate::error::Error::Http
+    /// [Manage Emojis and Stickers]: Permissions::MANAGE_EMOJIS_AND_STICKERS
     #[inline]
     pub async fn edit_emoji(
         &self,
@@ -1003,9 +1252,6 @@ impl Guild {
     /// # Errors
     ///
     /// Returns [`Error::Http`] if the current user lacks the necessary permissions.
-    ///
-    /// [`EditMember`]: crate::builder::EditMember
-    /// [`Error::Http`]: crate::error::Error::Http
     #[inline]
     pub async fn edit_member<F>(
         &self,
@@ -1034,7 +1280,6 @@ impl Guild {
     /// Otherwise will return [`Error::Http`] if the current user lacks permission.
     ///
     /// [Change Nickname]: Permissions::CHANGE_NICKNAME
-    /// [`Error::Http`]: crate::error::Error::Http
     pub async fn edit_nickname(
         &self,
         cache_http: impl CacheHttp,
@@ -1101,7 +1346,6 @@ impl Guild {
     /// Returns [`Error::Http`] if the current user lacks permission.
     ///
     /// [Manage Roles]: Permissions::MANAGE_ROLES
-    /// [`Error::Http`]: crate::error::Error::Http
     #[inline]
     pub async fn edit_role_position(
         &self,
@@ -1112,14 +1356,65 @@ impl Guild {
         self.id.edit_role_position(&http, role_id, position).await
     }
 
+    /// Modifies a scheduled event in the guild with the data set, if any.
+    ///
+    /// **Note**: Requires the [Manage Events] permission.
+    ///
+    /// # Errors
+    ///
+    /// If the `cache` is enabled, returns a [`ModelError::InvalidPermissions`] if the current user
+    /// does not have permission to manage roles.
+    ///
+    /// Otherwise will return [`Error::Http`] if the current user does not have permission.
+    ///
+    /// [Manage Events]: Permissions::MANAGE_EVENTS
+    pub async fn edit_scheduled_event<F>(
+        &self,
+        http: impl AsRef<Http>,
+        event_id: impl Into<ScheduledEventId>,
+        f: F,
+    ) -> Result<ScheduledEvent>
+    where
+        F: FnOnce(&mut EditScheduledEvent) -> &mut EditScheduledEvent,
+    {
+        self.id.edit_scheduled_event(&http, event_id, f).await
+    }
+
+    /// Edits a sticker, optionally setting its fields.
+    ///
+    /// Requires the [Manage Emojis and Stickers] permission.
+    ///
+    /// # Examples
+    ///
+    /// Rename a sticker:
+    ///
+    /// ```rust,ignore
+    /// guild.edit_sticker(&context, StickerId(7), |r| r.name("Bun bun meow"));
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Http`] if the current user lacks permission.
+    ///
+    /// [Manage Emojis and Stickers]: crate::model::permissions::Permissions::MANAGE_EMOJIS_AND_STICKERS
+    #[inline]
+    pub async fn edit_sticker<F>(
+        &self,
+        http: impl AsRef<Http>,
+        sticker_id: impl Into<StickerId>,
+        f: F,
+    ) -> Result<Sticker>
+    where
+        F: FnOnce(&mut EditSticker) -> &mut EditSticker,
+    {
+        self.id.edit_sticker(&http, sticker_id, f).await
+    }
+
     /// Edits the [`GuildWelcomeScreen`].
     ///
     /// # Errors
     ///
     /// Returns an [`Error::Http`] if some mandatory fields are not provided.
-    ///
-    /// [`Error::Http`]: crate::error::Error::Http
-    /// [`GuildWelcomeScreen`]: super::guild::GuildWelcomeScreen
     pub async fn edit_welcome_screen<F>(
         &self,
         http: impl AsRef<Http>,
@@ -1137,9 +1432,6 @@ impl Guild {
     ///
     /// Returns an [`Error::Http`] if the bot does not have the `MANAGE_GUILD`
     /// permission.
-    ///
-    /// [`Error::Http`]: crate::error::Error::Http
-    /// [`GuildWelcomeScreen`]: super::guild::GuildWelcomeScreen
     pub async fn edit_widget<F>(&self, http: impl AsRef<Http>, f: F) -> Result<GuildWidget>
     where
         F: FnOnce(&mut EditGuildWidget) -> &mut EditGuildWidget,
@@ -1155,8 +1447,6 @@ impl Guild {
     /// # Errors
     ///
     /// Returns an [`Error::Http`] if the current user is not in the guild.
-    ///
-    /// [`Error::Http`]: crate::error::Error::Http
     #[inline]
     pub async fn get(http: impl AsRef<Http>, guild_id: impl Into<GuildId>) -> Result<PartialGuild> {
         guild_id.into().to_partial_guild(&http).await
@@ -1177,17 +1467,17 @@ impl Guild {
     /// [`position`]: Role::position
     #[cfg(feature = "cache")]
     #[inline]
-    pub async fn greater_member_hierarchy(
+    pub fn greater_member_hierarchy(
         &self,
         cache: impl AsRef<Cache>,
         lhs_id: impl Into<UserId>,
         rhs_id: impl Into<UserId>,
     ) -> Option<UserId> {
-        self._greater_member_hierarchy(&cache, lhs_id.into(), rhs_id.into()).await
+        self._greater_member_hierarchy(&cache, lhs_id.into(), rhs_id.into())
     }
 
     #[cfg(feature = "cache")]
-    async fn _greater_member_hierarchy(
+    fn _greater_member_hierarchy(
         &self,
         cache: impl AsRef<Cache>,
         lhs_id: UserId,
@@ -1205,10 +1495,8 @@ impl Guild {
             return Some(rhs_id);
         }
 
-        let lhs =
-            self.members.get(&lhs_id)?.highest_role_info(&cache).await.unwrap_or((RoleId(0), 0));
-        let rhs =
-            self.members.get(&rhs_id)?.highest_role_info(&cache).await.unwrap_or((RoleId(0), 0));
+        let lhs = self.members.get(&lhs_id)?.highest_role_info(&cache).unwrap_or((RoleId(0), 0));
+        let rhs = self.members.get(&rhs_id)?.highest_role_info(&cache).unwrap_or((RoleId(0), 0));
 
         // If LHS and RHS both have no top position or have the same role ID,
         // then no one wins.
@@ -1240,11 +1528,12 @@ impl Guild {
     /// Returns the formatted URL of the guild's icon, if one exists.
     ///
     /// This will produce a WEBP image URL, or GIF if the guild has a GIF icon.
+    #[must_use]
     pub fn icon_url(&self) -> Option<String> {
         self.icon.as_ref().map(|icon| {
             let ext = if icon.starts_with("a_") { "gif" } else { "webp" };
 
-            format!(cdn!("/icons/{}/{}.{}"), self.id, icon, ext)
+            cdn!("/icons/{}/{}.{}", self.id, icon, ext)
         })
     }
 
@@ -1253,8 +1542,6 @@ impl Guild {
     /// # Errors
     ///
     /// Returns [`Error::Http`] if the guild is unavailable
-    ///
-    /// [`Error::Http`]: crate::error::Error::Http
     #[inline]
     pub async fn emojis(&self, http: impl AsRef<Http>) -> Result<Vec<Emoji>> {
         self.id.emojis(http).await
@@ -1267,11 +1554,8 @@ impl Guild {
     /// Returns an [`Error::Http`] if an emoji with that Id does not exist
     /// in the guild, or if the guild is unavailable.
     ///
-    /// May also return [`Error::Json`] if there is an error in deserialzing
+    /// May also return [`Error::Json`] if there is an error in deserializing
     /// the API response.
-    ///
-    /// [`Error::Http`]: crate::error::Error::Http
-    /// [`Error::Json`]: crate::error::Error::Json
     #[inline]
     pub async fn emoji(&self, http: impl AsRef<Http>, emoji_id: EmojiId) -> Result<Emoji> {
         self.id.emoji(http, emoji_id).await
@@ -1290,7 +1574,6 @@ impl Guild {
     /// the API response.
     ///
     /// [Manage Guild]: Permissions::MANAGE_GUILD
-    /// [`Error::Http`]: crate::error::Error::Http
     #[inline]
     pub async fn integrations(&self, http: impl AsRef<Http>) -> Result<Vec<Integration>> {
         self.id.integrations(&http).await
@@ -1327,6 +1610,7 @@ impl Guild {
     /// Checks if the guild is 'large'. A guild is considered large if it has
     /// more than 250 members.
     #[inline]
+    #[must_use]
     pub fn is_large(&self) -> bool {
         self.members.len() > LARGE_THRESHOLD as usize
     }
@@ -1340,18 +1624,17 @@ impl Guild {
     /// Returns [`Error::Http`] if the member cannot be kicked by
     /// the current user.
     ///
-    /// [`Error::Http`]: crate::error::Error::Http
     /// [Kick Members]: Permissions::KICK_MEMBERS
     #[inline]
     pub async fn kick(&self, http: impl AsRef<Http>, user_id: impl Into<UserId>) -> Result<()> {
         self.id.kick(&http, user_id).await
     }
 
-    #[inline]
     /// # Errors
     ///
     /// In addition to the reasons [`Self::kick`] may return an error,
     /// may also return an error if the reason is too long.
+    #[inline]
     pub async fn kick_with_reason(
         &self,
         http: impl AsRef<Http>,
@@ -1367,8 +1650,6 @@ impl Guild {
     ///
     /// May return an [`Error::Http`] if the current user
     /// cannot leave the guild, or currently is not in the guild.
-    ///
-    /// [`Error::Http`]: crate::error::Error::Http
     #[inline]
     pub async fn leave(&self, http: impl AsRef<Http>) -> Result<()> {
         self.id.leave(&http).await
@@ -1380,8 +1661,6 @@ impl Guild {
     ///
     /// Returns an [`Error::Http`] if the user is not in
     /// the guild or if the guild is otherwise unavailable.
-    ///
-    /// [`Error::Http`]: crate::error::Error::Http
     #[inline]
     pub async fn member(
         &self,
@@ -1404,8 +1683,6 @@ impl Guild {
     /// return [`Error::NotInRange`] if the input is not within range.
     ///
     /// [`User`]: crate::model::user::User
-    /// [`Error::Http`]: crate::error::Error::Http
-    /// [`Error::NotInRange`]: crate::error::Error::NotInRange
     #[inline]
     pub async fn members(
         &self,
@@ -1418,6 +1695,7 @@ impl Guild {
 
     /// Gets a list of all the members (satisfying the status provided to the function) in this
     /// guild.
+    #[must_use]
     pub fn members_with_status(&self, status: OnlineStatus) -> Vec<&Member> {
         let mut members = vec![];
 
@@ -1450,29 +1728,17 @@ impl Guild {
     /// **Note**: This will only search members that are cached. If you want to
     /// search all members in the guild via the Http API, use
     /// [`Self::search_members`].
+    #[must_use]
     pub fn member_named(&self, name: &str) -> Option<&Member> {
-        let (name, discrim) = if let Some(pos) = name.rfind('#') {
-            let split = name.split_at(pos + 1);
-
-            let split2 = (split.0.get(0..split.0.len() - 1).unwrap_or(""), split.1);
-
-            match split2.1.parse::<u16>() {
-                Ok(discrim_int) => (split2.0, Some(discrim_int)),
-                Err(_) => (name, None),
-            }
-        } else {
-            (name, None)
+        let (username, discrim) = match crate::utils::parse_user_tag(name) {
+            Some((username, discrim)) => (username, Some(discrim)),
+            None => (name, None),
         };
 
         for member in self.members.values() {
-            let name_matches = member.user.name == name;
-
-            let discrim_matches = match discrim {
-                Some(discrim) => member.user.discriminator == discrim,
-                None => true,
-            };
-
-            if name_matches && discrim_matches {
+            if member.user.name == username
+                && discrim.map_or(true, |d| member.user.discriminator == d)
+            {
                 return Some(member);
             }
         }
@@ -1682,7 +1948,7 @@ impl Guild {
     /// It would be sorted:
     /// - "zey", "azey", "zeyla", "zeylaa", "zeyzeyzey"
     ///
-    /// **Note**: Instead of panicing, when sorting does not find
+    /// **Note**: Instead of panicking, when sorting does not find
     /// a nick, the username will be used (this should never happen).
     ///
     /// **Locking**:
@@ -1766,13 +2032,16 @@ impl Guild {
     /// Helper function that's used for getting a [`Member`]'s permissions.
     #[cfg(feature = "cache")]
     pub(crate) fn _member_permission_from_member(&self, member: &Member) -> Permissions {
-        let everyone = match self.roles.get(&RoleId(self.id.0)) {
-            Some(everyone) => everyone,
-            None => {
-                error!("@everyone role ({}) missing in '{}'", self.id, self.name,);
+        if member.user.id == self.owner_id {
+            return Permissions::all();
+        }
 
-                return Permissions::empty();
-            },
+        let everyone = if let Some(everyone) = self.roles.get(&RoleId(self.id.0)) {
+            everyone
+        } else {
+            error!("@everyone role ({}) missing in '{}'", self.id, self.name);
+
+            return Permissions::empty();
         };
 
         let mut permissions = everyone.permissions;
@@ -1803,7 +2072,6 @@ impl Guild {
     /// in a voice channel for this [`Guild`].
     ///
     /// [Move Members]: Permissions::MOVE_MEMBERS
-    /// [`Error::Http`]: crate::error::Error::Http
     #[inline]
     pub async fn move_member(
         &self,
@@ -1820,8 +2088,6 @@ impl Guild {
     ///
     /// Returns [`Error::Model`] if the [`Member`] has a non-existent role
     /// for some reason.
-    ///
-    /// [`Error::Model`]: crate::error::Error::Model
     #[inline]
     pub fn user_permissions_in(
         &self,
@@ -1845,12 +2111,11 @@ impl Guild {
         }
 
         // Start by retrieving the @everyone role's permissions.
-        let everyone = match roles.get(&RoleId(guild_id.0)) {
-            Some(everyone) => everyone,
-            None => {
-                error!("@everyone role missing in {}", guild_id,);
-                return Err(Error::Model(ModelError::RoleNotFound));
-            },
+        let everyone = if let Some(everyone) = roles.get(&RoleId(guild_id.0)) {
+            everyone
+        } else {
+            error!("@everyone role missing in {}", guild_id,);
+            return Err(Error::Model(ModelError::RoleNotFound));
         };
 
         // Create a base set of permissions, starting with `@everyone`s.
@@ -1909,7 +2174,7 @@ impl Guild {
 
         // The default channel is always readable.
         if channel.id.0 == guild_id.0 {
-            permissions |= Permissions::READ_MESSAGES;
+            permissions |= Permissions::VIEW_CHANNEL;
         }
 
         Self::remove_unusable_permissions(&mut permissions);
@@ -1922,8 +2187,6 @@ impl Guild {
     /// # Errors
     ///
     /// Will return an [`Error::Model`] if the [`Role`] or [`Channel`] is not from this [`Guild`].
-    ///
-    /// [`Error::Model`]: crate::error::Error::Model
     #[inline]
     pub fn role_permissions_in(&self, channel: &GuildChannel, role: &Role) -> Result<Permissions> {
         Self::_role_permissions_in(channel, role, self.id)
@@ -1977,8 +2240,6 @@ impl Guild {
     /// Can also return [`Error::Json`] if there is an error in deserializing the API response.
     ///
     /// [Kick Members]: Permissions::KICK_MEMBERS
-    /// [`Error::Http`]: crate::error::Error::Http
-    /// [`Error::Json`]: crate::error::Error::Json
     pub async fn prune_count(&self, cache_http: impl CacheHttp, days: u16) -> Result<GuildPrune> {
         #[cfg(feature = "cache")]
         {
@@ -2005,9 +2266,9 @@ impl Guild {
                 | Permissions::ATTACH_FILES);
         }
 
-        // If the permission does not have the `READ_MESSAGES` permission, then
+        // If the permission does not have the `VIEW_CHANNEL` permission, then
         // throw out actionable permissions.
-        if !permissions.contains(Permissions::READ_MESSAGES) {
+        if !permissions.contains(Permissions::VIEW_CHANNEL) {
             *permissions &= !(Permissions::KICK_MEMBERS
                 | Permissions::BAN_MEMBERS
                 | Permissions::ADMINISTRATOR
@@ -2048,7 +2309,6 @@ impl Guild {
     /// Returns an [`Error::Http`] if the current user is lacking permission.
     ///
     /// [Manage Channels]: Permissions::MANAGE_CHANNELS
-    /// [`Error::Http`]: crate::error::Error::Http
     #[inline]
     pub async fn reorder_channels<It>(&self, http: impl AsRef<Http>, channels: It) -> Result<()>
     where
@@ -2068,8 +2328,6 @@ impl Guild {
     /// # Errors
     ///
     /// Returns an [`Error::Http`] if the API returns an error.
-    ///
-    /// [`Error::Http`]: crate::error::Error::Http
     #[inline]
     pub async fn search_members(
         &self,
@@ -2078,6 +2336,88 @@ impl Guild {
         limit: Option<u64>,
     ) -> Result<Vec<Member>> {
         self.id.search_members(http, query, limit).await
+    }
+
+    /// Fetches a specified scheduled event in the guild, by Id. If `with_user_count` is set to
+    /// `true`, then the `user_count` field will be populated, indicating the number of users
+    /// interested in the event.
+    ///
+    /// **Note**: Requires the [Manage Events] permission.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Http`] if the current user lacks permission, or if the provided Id is
+    /// invalid.
+    ///
+    /// [Manage Events]: Permissions::MANAGE_EVENTS
+    pub async fn scheduled_event(
+        self,
+        http: impl AsRef<Http>,
+        event_id: impl Into<ScheduledEventId>,
+        with_user_count: bool,
+    ) -> Result<ScheduledEvent> {
+        self.id.scheduled_event(&http, event_id, with_user_count).await
+    }
+
+    /// Fetches a list of all scheduled events in the guild. If `with_user_count` is set to `true`,
+    /// then each event returned will have its `user_count` field populated.
+    ///
+    /// **Note**: Requires the [Manage Events] permission.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Http`] if the current user lacks permission.
+    ///
+    /// [Manage Events]: Permissions::MANAGE_EVENTS
+    pub async fn scheduled_events(
+        self,
+        http: impl AsRef<Http>,
+        with_user_count: bool,
+    ) -> Result<Vec<ScheduledEvent>> {
+        self.id.scheduled_events(&http, with_user_count).await
+    }
+
+    /// Fetches a list of interested users for the specified event.
+    ///
+    /// If `limit` is left unset, by default at most 100 users are returned.
+    ///
+    /// **Note**: Requires the [Manage Events] permission.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Http`] if the current user lacks permission, or if the provided Id is
+    /// invalid.
+    ///
+    /// [Manage Events]: Permissions::MANAGE_EVENTS
+    pub async fn scheduled_event_users(
+        self,
+        http: impl AsRef<Http>,
+        event_id: impl Into<ScheduledEventId>,
+        limit: Option<u64>,
+    ) -> Result<Vec<ScheduledEventUser>> {
+        self.id.scheduled_event_users(&http, event_id, limit).await
+    }
+
+    /// Fetches a list of interested users for the specified event, with additional options and
+    /// filtering. See [`Http::get_scheduled_event_users`] for details.
+    ///
+    /// **Note**: Requires the [Manage Events] permission.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Http`] if the current user lacks permission, or if the provided Id is
+    /// invalid.
+    ///
+    /// [Manage Events]: Permissions::MANAGE_EVENTS
+    pub async fn scheduled_event_users_optioned(
+        self,
+        http: impl AsRef<Http>,
+        event_id: impl Into<ScheduledEventId>,
+        limit: Option<u64>,
+        target: Option<UserPagination>,
+        with_member: Option<bool>,
+    ) -> Result<Vec<ScheduledEventUser>> {
+        self.id.scheduled_event_users_optioned(&http, event_id, limit, target, with_member).await
     }
 
     /// Returns the Id of the shard associated with the guild.
@@ -2092,8 +2432,8 @@ impl Guild {
     /// [`utils::shard_id`]: crate::utils::shard_id
     #[cfg(all(feature = "cache", feature = "utils"))]
     #[inline]
-    pub async fn shard_id(&self, cache: impl AsRef<Cache>) -> u64 {
-        self.id.shard_id(&cache).await
+    pub fn shard_id(&self, cache: impl AsRef<Cache>) -> u64 {
+        self.id.shard_id(&cache)
     }
 
     /// Returns the Id of the shard associated with the guild.
@@ -2118,15 +2458,15 @@ impl Guild {
     /// ```
     #[cfg(all(feature = "utils", not(feature = "cache")))]
     #[inline]
-    pub async fn shard_id(&self, shard_count: u64) -> u64 {
-        self.id.shard_id(shard_count).await
+    #[must_use]
+    pub fn shard_id(&self, shard_count: u64) -> u64 {
+        self.id.shard_id(shard_count)
     }
 
     /// Returns the formatted URL of the guild's splash image, if one exists.
+    #[must_use]
     pub fn splash_url(&self) -> Option<String> {
-        self.splash
-            .as_ref()
-            .map(|splash| format!(cdn!("/splashes/{}/{}.webp?size=4096"), self.id, splash))
+        self.splash.as_ref().map(|splash| cdn!("/splashes/{}/{}.webp?size=4096", self.id, splash))
     }
 
     /// Starts an integration sync for the given integration Id.
@@ -2139,7 +2479,6 @@ impl Guild {
     /// or if an [`Integration`] with that Id does not exist.
     ///
     /// [Manage Guild]: Permissions::MANAGE_GUILD
-    /// [`Error::Http`]: crate::error::Error::Http
     #[inline]
     pub async fn start_integration_sync(
         &self,
@@ -2167,8 +2506,6 @@ impl Guild {
     /// the API response.
     ///
     /// [Kick Members]: Permissions::KICK_MEMBERS
-    /// [`Error::Http`]: crate::error::Error::Http
-    /// [`Error::Json`]: crate::error::Error::Json
     pub async fn start_prune(&self, cache_http: impl CacheHttp, days: u16) -> Result<GuildPrune> {
         #[cfg(feature = "cache")]
         {
@@ -2197,7 +2534,6 @@ impl Guild {
     /// have permission.
     ///
     /// [Ban Members]: Permissions::BAN_MEMBERS
-    /// [`Error::Http`]: crate::error::Error::Http
     pub async fn unban(
         &self,
         cache_http: impl CacheHttp,
@@ -2228,9 +2564,6 @@ impl Guild {
     /// Will return [`Error::Http`] if the current user is lacking permissions.
     /// Can also return an [`Error::Json`] if there is an error deserializing
     /// the API response.
-    ///
-    /// [`Error::Http`]: crate::error::Error::Http
-    /// [`Error::Json`]: crate::error::Error::Json
     #[inline]
     pub async fn vanity_url(&self, http: impl AsRef<Http>) -> Result<String> {
         self.id.vanity_url(&http).await
@@ -2247,9 +2580,6 @@ impl Guild {
     /// Will return an [`Error::Http`] if the current user is lacking permissions.
     /// Can also return an [`Error::Json`] if there is an error deserializing
     /// the API response.
-    ///
-    /// [`Error::Http`]: crate::error::Error::Http
-    /// [`Error::Json`]: crate::error::Error::Json
     #[inline]
     pub async fn webhooks(&self, http: impl AsRef<Http>) -> Result<Vec<Webhook>> {
         self.id.webhooks(&http).await
@@ -2276,7 +2606,7 @@ impl Guild {
     /// impl EventHandler for Handler {
     ///     async fn message(&self, ctx: Context, msg: Message) {
     ///         if let Some(guild_id) = msg.guild_id {
-    ///             if let Some(guild) = guild_id.to_guild_cached(&ctx).await {
+    ///             if let Some(guild) = guild_id.to_guild_cached(&ctx) {
     ///                 if let Some(role) = guild.role_by_name("role_name") {
     ///                     println!("{:?}", role);
     ///                 }
@@ -2285,53 +2615,45 @@ impl Guild {
     ///     }
     /// }
     ///
-    /// let mut client = Client::builder("token").event_handler(Handler).await?;
+    /// let mut client =
+    ///     Client::builder("token", GatewayIntents::default()).event_handler(Handler).await?;
     ///
     /// client.start().await?;
     /// #    Ok(())
     /// # }
     /// ```
+    #[must_use]
     pub fn role_by_name(&self, role_name: &str) -> Option<&Role> {
         self.roles.values().find(|role| role_name == role.name)
     }
 
     /// Returns a future that will await one message sent in this guild.
     #[cfg(feature = "collector")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "collector")))]
-    pub fn await_reply<'a>(
-        &self,
-        shard_messenger: &'a impl AsRef<ShardMessenger>,
-    ) -> CollectReply<'a> {
+    pub fn await_reply(&self, shard_messenger: impl AsRef<ShardMessenger>) -> CollectReply {
         CollectReply::new(shard_messenger).guild_id(self.id.0)
     }
 
     /// Returns a stream builder which can be awaited to obtain a stream of messages in this guild.
     #[cfg(feature = "collector")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "collector")))]
-    pub fn await_replies<'a>(
+    pub fn await_replies(
         &self,
-        shard_messenger: &'a impl AsRef<ShardMessenger>,
-    ) -> MessageCollectorBuilder<'a> {
+        shard_messenger: impl AsRef<ShardMessenger>,
+    ) -> MessageCollectorBuilder {
         MessageCollectorBuilder::new(shard_messenger).guild_id(self.id.0)
     }
 
     /// Await a single reaction in this guild.
     #[cfg(feature = "collector")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "collector")))]
-    pub fn await_reaction<'a>(
-        &self,
-        shard_messenger: &'a impl AsRef<ShardMessenger>,
-    ) -> CollectReaction<'a> {
+    pub fn await_reaction(&self, shard_messenger: impl AsRef<ShardMessenger>) -> CollectReaction {
         CollectReaction::new(shard_messenger).guild_id(self.id.0)
     }
 
     /// Returns a stream builder which can be awaited to obtain a stream of reactions sent in this guild.
     #[cfg(feature = "collector")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "collector")))]
-    pub fn await_reactions<'a>(
+    pub fn await_reactions(
         &self,
-        shard_messenger: &'a impl AsRef<ShardMessenger>,
-    ) -> ReactionCollectorBuilder<'a> {
+        shard_messenger: impl AsRef<ShardMessenger>,
+    ) -> ReactionCollectorBuilder {
         ReactionCollectorBuilder::new(shard_messenger).guild_id(self.id.0)
     }
 
@@ -2350,38 +2672,36 @@ impl<'de> Deserialize<'de> for Guild {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> StdResult<Self, D::Error> {
         let mut map = JsonMap::deserialize(deserializer)?;
 
-        let id = map.get("id").and_then(|x| x.as_str()).and_then(|x| x.parse::<u64>().ok());
+        let id = map.get("id").and_then(Value::as_str).and_then(|x| x.parse::<u64>().ok());
 
         if let Some(guild_id) = id {
-            if let Some(array) = map.get_mut("channels").and_then(|x| x.as_array_mut()) {
+            if let Some(array) = map.get_mut("channels").and_then(Value::as_array_mut) {
                 for value in array {
                     if let Some(channel) = value.as_object_mut() {
-                        channel
-                            .insert("guild_id".to_string(), Value::Number(Number::from(guild_id)));
+                        channel.insert("guild_id".to_string(), from_number(guild_id));
                     }
                 }
             }
 
-            if let Some(array) = map.get_mut("members").and_then(|x| x.as_array_mut()) {
+            if let Some(array) = map.get_mut("members").and_then(Value::as_array_mut) {
                 for value in array {
                     if let Some(member) = value.as_object_mut() {
-                        member
-                            .insert("guild_id".to_string(), Value::Number(Number::from(guild_id)));
+                        member.insert("guild_id".to_string(), from_number(guild_id));
                     }
                 }
             }
 
-            if let Some(array) = map.get_mut("roles").and_then(|x| x.as_array_mut()) {
+            if let Some(array) = map.get_mut("roles").and_then(Value::as_array_mut) {
                 for value in array {
                     if let Some(role) = value.as_object_mut() {
-                        role.insert("guild_id".to_string(), Value::Number(Number::from(guild_id)));
+                        role.insert("guild_id".to_string(), from_number(guild_id));
                     }
                 }
             }
         }
 
         let afk_channel_id = match map.remove("afk_channel_id") {
-            Some(v) => serde_json::from_value::<Option<ChannelId>>(v).map_err(DeError::custom)?,
+            Some(v) => from_value::<Option<ChannelId>>(v).map_err(DeError::custom)?,
             None => None,
         };
         let afk_timeout = map
@@ -2390,9 +2710,7 @@ impl<'de> Deserialize<'de> for Guild {
             .and_then(u64::deserialize)
             .map_err(DeError::custom)?;
         let application_id = match map.remove("application_id") {
-            Some(v) => {
-                serde_json::from_value::<Option<ApplicationId>>(v).map_err(DeError::custom)?
-            },
+            Some(v) => from_value::<Option<ApplicationId>>(v).map_err(DeError::custom)?,
             None => None,
         };
         let channels = map
@@ -2408,7 +2726,7 @@ impl<'de> Deserialize<'de> for Guild {
         let emojis = map
             .remove("emojis")
             .ok_or_else(|| DeError::custom("expected guild emojis"))
-            .and_then(deserialize_emojis)
+            .and_then(emojis::deserialize)
             .map_err(DeError::custom)?;
         let explicit_content_filter = map
             .remove("explicit_content_filter")
@@ -2417,8 +2735,8 @@ impl<'de> Deserialize<'de> for Guild {
             .map_err(DeError::custom)?;
         let features = map
             .remove("features")
-            .ok_or_else(|| DeError::custom("expected guild features"))
-            .and_then(serde_json::from_value::<Vec<String>>)
+            .ok_or(Error::Other("expected guild features"))
+            .and_then(from_value::<Vec<String>>)
             .map_err(DeError::custom)?;
         let icon = match map.remove("icon") {
             Some(v) => Option::<String>::deserialize(v).map_err(DeError::custom)?,
@@ -2432,7 +2750,7 @@ impl<'de> Deserialize<'de> for Guild {
         let joined_at = map
             .remove("joined_at")
             .ok_or_else(|| DeError::custom("expected guild joined_at"))
-            .and_then(DateTime::deserialize)
+            .and_then(Timestamp::deserialize)
             .map_err(DeError::custom)?;
         let large = map
             .remove("large")
@@ -2467,17 +2785,12 @@ impl<'de> Deserialize<'de> for Guild {
         let presences = map
             .remove("presences")
             .ok_or_else(|| DeError::custom("expected guild presences"))
-            .and_then(deserialize_presences)
-            .map_err(DeError::custom)?;
-        let region = map
-            .remove("region")
-            .ok_or_else(|| DeError::custom("expected guild region"))
-            .and_then(String::deserialize)
+            .and_then(presences::deserialize)
             .map_err(DeError::custom)?;
         let roles = map
             .remove("roles")
             .ok_or_else(|| DeError::custom("expected guild roles"))
-            .and_then(deserialize_roles)
+            .and_then(roles::deserialize)
             .map_err(DeError::custom)?;
         let splash = match map.remove("splash") {
             Some(v) => Option::<String>::deserialize(v).map_err(DeError::custom)?,
@@ -2506,7 +2819,10 @@ impl<'de> Deserialize<'de> for Guild {
             None => PremiumTier::default(),
         };
         let premium_subscription_count = match map.remove("premium_subscription_count") {
+            #[cfg(not(feature = "simd-json"))]
             Some(Value::Null) | None => 0,
+            #[cfg(feature = "simd-json")]
+            Some(Value::Static(StaticNode::Null)) | None => 0,
             Some(v) => u64::deserialize(v).map_err(DeError::custom)?,
         };
         let banner = match map.remove("banner") {
@@ -2524,71 +2840,42 @@ impl<'de> Deserialize<'de> for Guild {
             .and_then(String::deserialize)
             .map_err(DeError::custom)?;
 
-        let welcome_screen = match map.contains_key("welcome_screen") {
-            true => Some(
-                map.remove("welcome_screen")
-                    .ok_or_else(|| DeError::custom("expected welcome_screen"))
-                    .and_then(GuildWelcomeScreen::deserialize)
-                    .map_err(DeError::custom)?,
-            ),
-            false => None,
-        };
+        let welcome_screen = map
+            .remove("welcome_screen")
+            .map(GuildWelcomeScreen::deserialize)
+            .transpose()
+            .map_err(DeError::custom)?;
 
-        let approximate_member_count = match map.contains_key("approximate_member_count") {
-            true => Some(
-                map.remove("approximate_member_count")
-                    .ok_or_else(|| DeError::custom("expected approximate_member_count"))
-                    .and_then(u64::deserialize)
-                    .map_err(DeError::custom)?,
-            ),
-            false => None,
-        };
+        let approximate_member_count = map
+            .remove("approximate_member_count")
+            .map(u64::deserialize)
+            .transpose()
+            .map_err(DeError::custom)?;
 
-        let approximate_presence_count = match map.contains_key("approximate_presence_count") {
-            true => Some(
-                map.remove("approximate_presence_count")
-                    .ok_or_else(|| DeError::custom("expected approximate_presence_count"))
-                    .and_then(u64::deserialize)
-                    .map_err(DeError::custom)?,
-            ),
-            false => None,
-        };
+        let approximate_presence_count = map
+            .remove("approximate_presence_count")
+            .map(u64::deserialize)
+            .transpose()
+            .map_err(DeError::custom)?;
 
-        let max_video_channel_users = match map.contains_key("max_video_channel_users") {
-            true => Some(
-                map.remove("max_video_channel_users")
-                    .ok_or_else(|| DeError::custom("expected max_video_channel_users"))
-                    .and_then(u64::deserialize)
-                    .map_err(DeError::custom)?,
-            ),
-            false => None,
-        };
+        let max_video_channel_users = map
+            .remove("max_video_channel_users")
+            .map(u64::deserialize)
+            .transpose()
+            .map_err(DeError::custom)?;
 
         let max_presences = match map.remove("max_presences") {
             Some(v) => Option::<u64>::deserialize(v).map_err(DeError::custom)?,
             None => None,
         };
 
-        let max_members = match map.contains_key("max_members") {
-            true => Some(
-                map.remove("max_members")
-                    .ok_or_else(|| DeError::custom("expected max_members"))
-                    .and_then(u64::deserialize)
-                    .map_err(DeError::custom)?,
-            ),
-            false => None,
-        };
+        let max_members =
+            map.remove("max_members").map(u64::deserialize).transpose().map_err(DeError::custom)?;
 
         let discovery_splash = match map.remove("discovery_splash") {
             Some(v) => Option::<String>::deserialize(v).map_err(DeError::custom)?,
             None => None,
         };
-
-        let nsfw = map
-            .remove("nsfw")
-            .ok_or_else(|| DeError::custom("expected nsfw"))
-            .and_then(bool::deserialize)
-            .map_err(DeError::custom)?;
 
         let nsfw_level = map
             .remove("nsfw_level")
@@ -2632,7 +2919,12 @@ impl<'de> Deserialize<'de> for Guild {
             None => Vec::new(),
         };
 
-        #[allow(deprecated)]
+        let stickers = map
+            .remove("stickers")
+            .ok_or_else(|| DeError::custom("expected guild stickers"))
+            .and_then(stickers::deserialize)
+            .map_err(DeError::custom)?;
+
         Ok(Self {
             afk_channel_id,
             afk_timeout,
@@ -2652,7 +2944,6 @@ impl<'de> Deserialize<'de> for Guild {
             name,
             owner_id,
             presences,
-            region,
             roles,
             splash,
             discovery_splash,
@@ -2671,7 +2962,6 @@ impl<'de> Deserialize<'de> for Guild {
             welcome_screen,
             approximate_member_count,
             approximate_presence_count,
-            nsfw,
             nsfw_level,
             max_video_channel_users,
             max_presences,
@@ -2680,6 +2970,7 @@ impl<'de> Deserialize<'de> for Guild {
             widget_channel_id,
             stage_instances,
             threads,
+            stickers,
         })
     }
 }
@@ -2732,126 +3023,9 @@ pub enum GuildContainer {
     Id(GuildId),
 }
 
-/// Information relating to a guild's welcome screen.
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct GuildWelcomeScreen {
-    /// The server description shown in the welcome screen.
-    pub description: Option<String>,
-    /// The channels shown in the welcome screen.
-    ///
-    /// **Note**: There can only be only up to 5 channels.
-    pub welcome_channels: Vec<GuildWelcomeChannel>,
-}
-
-/// A channel shown in the [`GuildWelcomeScreen`].
-#[derive(Clone, Debug)]
-#[non_exhaustive]
-pub struct GuildWelcomeChannel {
-    /// The channel Id.
-    pub channel_id: ChannelId,
-    /// The description shown for the channel.
-    pub description: String,
-    /// The emoji shown, if there is one.
-    pub emoji: Option<GuildWelcomeScreenEmoji>,
-}
-
-impl<'de> Deserialize<'de> for GuildWelcomeChannel {
-    fn deserialize<D>(deserializer: D) -> StdResult<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let mut map = JsonMap::deserialize(deserializer)?;
-
-        let channel_id = map
-            .remove("channel_id")
-            .ok_or_else(|| DeError::custom("expected channel_id"))
-            .and_then(ChannelId::deserialize)
-            .map_err(DeError::custom)?;
-
-        let description = map
-            .remove("description")
-            .ok_or_else(|| DeError::custom("expected description"))
-            .and_then(String::deserialize)
-            .map_err(DeError::custom)?;
-
-        let mut emoji = None;
-
-        let emoji_id =
-            map.remove("emoji_id").ok_or_else(|| DeError::custom("expected emoji_id"))?;
-
-        let emoji_name =
-            map.remove("emoji_name").ok_or_else(|| DeError::custom("expected emoji_name"))?;
-
-        if emoji_id != Value::Null {
-            emoji = Some(GuildWelcomeScreenEmoji::Custom(
-                EmojiId::deserialize(emoji_id).expect("expected emoji_id"),
-            ));
-        }
-
-        if emoji_name != Value::Null {
-            emoji = Some(GuildWelcomeScreenEmoji::Unicode(
-                String::deserialize(emoji_name).expect("expected emoji_name"),
-            ));
-        }
-
-        Ok(Self {
-            channel_id,
-            description,
-            emoji,
-        })
-    }
-}
-
-impl Serialize for GuildWelcomeChannel {
-    fn serialize<S>(&self, serializer: S) -> StdResult<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let mut map = JsonMap::new();
-
-        map.insert("channel_id".to_owned(), Value::String(self.channel_id.to_string()));
-        map.insert("description".to_owned(), Value::String(self.description.to_string()));
-
-        map.insert("emoji_id".to_owned(), Value::Null);
-        map.insert("emoji_name".to_owned(), Value::Null);
-
-        if let Some(emoji) = self.emoji.to_owned() {
-            match emoji {
-                GuildWelcomeScreenEmoji::Custom(id) => {
-                    map.insert("emoji_id".to_owned(), Value::String(id.to_string()))
-                },
-                GuildWelcomeScreenEmoji::Unicode(name) => {
-                    map.insert("emoji_name".to_owned(), Value::String(name))
-                },
-            };
-        };
-
-        map.serialize(serializer)
-    }
-}
-
-/// A [`GuildWelcomeScreen`] emoji.
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
-#[non_exhaustive]
-pub enum GuildWelcomeScreenEmoji {
-    /// A custom emoji.
-    Custom(EmojiId),
-    /// A unicode emoji.
-    Unicode(String),
-}
-
-/// A [`Guild`] embed.
-#[deprecated(note = "GuildEmbed was renamed to GuildWidget")]
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[non_exhaustive]
-pub struct GuildEmbed {
-    /// Whether the embed is enabled.
-    pub enabled: bool,
-    /// The widget channel id.
-    pub channel_id: Option<ChannelId>,
-}
-
 /// A [`Guild`] widget.
+///
+/// [Discord docs](https://discord.com/developers/docs/resources/guild#guild-widget-settings-object).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct GuildWidget {
@@ -2863,6 +3037,8 @@ pub struct GuildWidget {
 
 /// Representation of the number of members that would be pruned by a guild
 /// prune operation.
+///
+/// [Discord docs](https://discord.com/developers/docs/resources/guild#get-guild-prune-count).
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 pub struct GuildPrune {
     /// The number of members that would be pruned by the operation.
@@ -2870,6 +3046,9 @@ pub struct GuildPrune {
 }
 
 /// Basic information about a guild.
+///
+/// [Discord docs](https://discord.com/developers/docs/resources/guild#guild-object), subset undocumented (closest thing is
+/// [this](https://discord.com/developers/docs/topics/rpc#getguilds-get-guilds-response-structure)).
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct GuildInfo {
     /// The unique Id of the guild.
@@ -2893,11 +3072,12 @@ impl GuildInfo {
     /// Returns the formatted URL of the guild's icon, if the guild has an icon.
     ///
     /// This will produce a WEBP image URL, or GIF if the guild has a GIF icon.
+    #[must_use]
     pub fn icon_url(&self) -> Option<String> {
         self.icon.as_ref().map(|icon| {
             let ext = if icon.starts_with("a_") { "gif" } else { "webp" };
 
-            format!(cdn!("/icons/{}/{}.{}"), self.id, icon, ext)
+            cdn!("/icons/{}/{}.{}", self.id, icon, ext)
         })
     }
 }
@@ -2923,16 +3103,17 @@ impl From<u64> for GuildContainer {
 #[cfg(feature = "model")]
 impl InviteGuild {
     /// Returns the formatted URL of the guild's splash image, if one exists.
+    #[must_use]
     pub fn splash_url(&self) -> Option<String> {
-        self.splash
-            .as_ref()
-            .map(|splash| format!(cdn!("/splashes/{}/{}.webp?size=4096"), self.id, splash))
+        self.splash.as_ref().map(|splash| cdn!("/splashes/{}/{}.webp?size=4096", self.id, splash))
     }
 }
 
 /// Data for an unavailable guild.
+///
+/// [Discord docs](https://discord.com/developers/docs/resources/guild#unavailable-guild-object).
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
-pub struct GuildUnavailable {
+pub struct UnavailableGuild {
     /// The Id of the [`Guild`] that may be unavailable.
     pub id: GuildId,
     /// Indicator of whether the guild is unavailable.
@@ -2940,29 +3121,9 @@ pub struct GuildUnavailable {
     pub unavailable: bool,
 }
 
-#[allow(clippy::large_enum_variant)]
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[non_exhaustive]
-#[serde(untagged)]
-pub enum GuildStatus {
-    OnlinePartialGuild(PartialGuild),
-    OnlineGuild(Guild),
-    Offline(GuildUnavailable),
-}
-
-#[cfg(feature = "model")]
-impl GuildStatus {
-    /// Retrieves the Id of the inner [`Guild`].
-    pub fn id(&self) -> GuildId {
-        match *self {
-            GuildStatus::Offline(offline) => offline.id,
-            GuildStatus::OnlineGuild(ref guild) => guild.id,
-            GuildStatus::OnlinePartialGuild(ref partial_guild) => partial_guild.id,
-        }
-    }
-}
-
 /// Default message notification level for a guild.
+///
+/// [Discord docs](https://discord.com/developers/docs/resources/guild#guild-object-default-message-notification-level).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, PartialOrd, Ord)]
 #[non_exhaustive]
 pub enum DefaultMessageNotificationLevel {
@@ -2980,6 +3141,8 @@ enum_number!(DefaultMessageNotificationLevel {
 });
 
 /// Setting used to filter explicit messages from members.
+///
+/// [Discord docs](https://discord.com/developers/docs/resources/guild#guild-object-explicit-content-filter-level).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, PartialOrd, Ord)]
 #[non_exhaustive]
 pub enum ExplicitContentFilter {
@@ -3000,6 +3163,8 @@ enum_number!(ExplicitContentFilter {
 });
 
 /// Multi-Factor Authentication level for guild moderators.
+///
+/// [Discord docs](https://discord.com/developers/docs/resources/guild#guild-object-mfa-level).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, PartialOrd, Ord)]
 #[non_exhaustive]
 pub enum MfaLevel {
@@ -3016,75 +3181,10 @@ enum_number!(MfaLevel {
     Elevated
 });
 
-/// The name of a region that a voice server can be located in.
-#[derive(Copy, Clone, Debug, Deserialize, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize)]
-#[non_exhaustive]
-pub enum Region {
-    #[serde(rename = "amsterdam")]
-    Amsterdam,
-    #[serde(rename = "brazil")]
-    Brazil,
-    #[serde(rename = "eu-central")]
-    EuCentral,
-    #[serde(rename = "eu-west")]
-    EuWest,
-    #[serde(rename = "frankfurt")]
-    Frankfurt,
-    #[serde(rename = "hongkong")]
-    HongKong,
-    #[serde(rename = "japan")]
-    Japan,
-    #[serde(rename = "london")]
-    London,
-    #[serde(rename = "russia")]
-    Russia,
-    #[serde(rename = "singapore")]
-    Singapore,
-    #[serde(rename = "sydney")]
-    Sydney,
-    #[serde(rename = "us-central")]
-    UsCentral,
-    #[serde(rename = "us-east")]
-    UsEast,
-    #[serde(rename = "us-south")]
-    UsSouth,
-    #[serde(rename = "us-west")]
-    UsWest,
-    #[serde(rename = "vip-amsterdam")]
-    VipAmsterdam,
-    #[serde(rename = "vip-us-east")]
-    VipUsEast,
-    #[serde(rename = "vip-us-west")]
-    VipUsWest,
-}
-
-impl Region {
-    pub fn name(&self) -> &str {
-        match *self {
-            Region::Amsterdam => "amsterdam",
-            Region::Brazil => "brazil",
-            Region::EuCentral => "eu-central",
-            Region::EuWest => "eu-west",
-            Region::Frankfurt => "frankfurt",
-            Region::HongKong => "hongkong",
-            Region::Japan => "japan",
-            Region::London => "london",
-            Region::Russia => "russia",
-            Region::Singapore => "singapore",
-            Region::Sydney => "sydney",
-            Region::UsCentral => "us-central",
-            Region::UsEast => "us-east",
-            Region::UsSouth => "us-south",
-            Region::UsWest => "us-west",
-            Region::VipAmsterdam => "vip-amsterdam",
-            Region::VipUsEast => "vip-us-east",
-            Region::VipUsWest => "vip-us-west",
-        }
-    }
-}
-
 /// The level to set as criteria prior to a user being able to send
 /// messages in a [`Guild`].
+///
+/// [Discord docs](https://discord.com/developers/docs/resources/guild#guild-object-verification-level).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, PartialOrd, Ord)]
 #[non_exhaustive]
 pub enum VerificationLevel {
@@ -3111,6 +3211,8 @@ enum_number!(VerificationLevel {
 });
 
 /// The [`Guild`] nsfw level.
+///
+/// [Discord docs](https://discord.com/developers/docs/resources/guild#guild-object-guild-nsfw-level).
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, PartialOrd, Ord)]
 #[non_exhaustive]
 pub enum NsfwLevel {
@@ -3139,8 +3241,6 @@ mod test {
     mod model {
         use std::collections::*;
 
-        use chrono::prelude::*;
-
         use crate::model::prelude::*;
 
         fn gen_user() -> User {
@@ -3148,9 +3248,7 @@ mod test {
         }
 
         fn gen_member() -> Member {
-            #[allow(clippy::zero_prefixed_literal)]
-            let dt: DateTime<Utc> =
-                FixedOffset::east(5 * 3600).ymd(2016, 11, 08).and_hms(0, 0, 0).with_timezone(&Utc);
+            let dt = Timestamp::now();
 
             let vec1 = Vec::new();
             let u = gen_user();
@@ -3165,9 +3263,9 @@ mod test {
                 user: u,
                 pending: false,
                 premium_since: None,
-                #[cfg(feature = "unstable_discord_api")]
                 permissions: None,
                 avatar: None,
+                communication_disabled_until: None,
             }
         }
 
@@ -3179,14 +3277,13 @@ mod test {
             let hm2 = HashMap::new();
             let vec1 = Vec::new();
 
-            #[allow(clippy::zero_prefixed_literal)]
-            let dt: DateTime<Utc> =
-                FixedOffset::east(5 * 3600).ymd(2016, 11, 08).and_hms(0, 0, 0).with_timezone(&Utc);
+            let dt = Timestamp::now();
 
             let mut hm3 = HashMap::new();
             let hm4 = HashMap::new();
             let hm5 = HashMap::new();
             let hm6 = HashMap::new();
+            let hm7 = HashMap::new();
 
             hm3.insert(u.id, m);
 
@@ -3209,7 +3306,6 @@ mod test {
                 name: "Spaghetti".to_string(),
                 owner_id: UserId(210),
                 presences: hm4,
-                region: "NA".to_string(),
                 roles: hm5,
                 splash: Some("asdf".to_string()),
                 verification_level: VerificationLevel::None,
@@ -3219,7 +3315,7 @@ mod test {
                 application_id: Some(ApplicationId(0)),
                 explicit_content_filter: ExplicitContentFilter::None,
                 system_channel_id: Some(ChannelId(0)),
-                system_channel_flags: Default::default(),
+                system_channel_flags: SystemChannelFlags::default(),
                 rules_channel_id: None,
                 premium_subscription_count: 12,
                 banner: None,
@@ -3228,7 +3324,6 @@ mod test {
                 welcome_screen: None,
                 approximate_member_count: None,
                 approximate_presence_count: None,
-                nsfw: false,
                 nsfw_level: NsfwLevel::Default,
                 max_video_channel_users: None,
                 max_presences: None,
@@ -3239,21 +3334,20 @@ mod test {
                 public_updates_channel_id: None,
                 stage_instances: vec![],
                 threads: vec![],
+                stickers: hm7,
             }
         }
 
-        #[tokio::test]
-        #[allow(clippy::unwrap_used)]
-        async fn member_named_username() {
+        #[test]
+        fn member_named_username() {
             let guild = gen();
             let lhs = guild.member_named("test#1432").unwrap().display_name();
 
             assert_eq!(lhs, gen_member().display_name());
         }
 
-        #[tokio::test]
-        #[allow(clippy::unwrap_used)]
-        async fn member_named_nickname() {
+        #[test]
+        fn member_named_nickname() {
             let guild = gen();
             let lhs = guild.member_named("aaaa").unwrap().display_name();
 

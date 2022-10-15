@@ -1,14 +1,16 @@
 use async_tungstenite::tungstenite::Message;
 
-#[cfg(all(feature = "unstable_discord_api", feature = "collector"))]
-use crate::collector::ComponentInteractionFilter;
 #[cfg(feature = "collector")]
-use crate::collector::{EventFilter, MessageFilter, ReactionFilter};
-use crate::model::{
-    gateway::Activity,
-    id::{GuildId, UserId},
-    user::OnlineStatus,
+use crate::collector::{
+    ComponentInteractionFilter,
+    EventFilter,
+    MessageFilter,
+    ModalInteractionFilter,
+    ReactionFilter,
 };
+use crate::model::gateway::Activity;
+use crate::model::id::{GuildId, UserId};
+use crate::model::user::OnlineStatus;
 
 #[derive(Clone, Debug)]
 pub enum ChunkGuildFilter {
@@ -57,24 +59,23 @@ pub enum ShardRunnerMessage {
     /// Indicates that the client is to update the shard's presence's activity.
     SetActivity(Option<Activity>),
     /// Indicates that the client is to update the shard's presence in its
-    /// entirity.
+    /// entirety.
     SetPresence(OnlineStatus, Option<Activity>),
     /// Indicates that the client is to update the shard's presence's status.
     SetStatus(OnlineStatus),
     /// Sends a new filter for events to the shard.
     #[cfg(feature = "collector")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "collector")))]
     SetEventFilter(EventFilter),
     /// Sends a new filter for messages to the shard.
     #[cfg(feature = "collector")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "collector")))]
     SetMessageFilter(MessageFilter),
     /// Sends a new filter for reactions to the shard.
     #[cfg(feature = "collector")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "collector")))]
     SetReactionFilter(ReactionFilter),
     /// Sends a new filter for component interactions to the shard.
-    #[cfg(all(feature = "unstable_discord_api", feature = "collector"))]
-    #[cfg_attr(docsrs, doc(cfg(all(feature = "unstable_discord_api", feature = "collector"))))]
+    #[cfg(feature = "collector")]
     SetComponentInteractionFilter(ComponentInteractionFilter),
+    /// Sends a new filter for modal interactions to the shard.
+    #[cfg(feature = "collector")]
+    SetModalInteractionFilter(ModalInteractionFilter),
 }

@@ -1,36 +1,32 @@
-use std::{
-    boxed::Box,
-    future::Future,
-    pin::Pin,
-    sync::Arc,
-    task::{Context as FutContext, Poll},
-    time::Duration,
-};
+use std::fmt;
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::Arc;
+use std::task::{Context as FutContext, Poll};
+use std::time::Duration;
 
-use futures::{
-    future::BoxFuture,
-    stream::{Stream, StreamExt},
-};
+use futures::future::BoxFuture;
+use futures::stream::{Stream, StreamExt};
 use tokio::sync::mpsc::{
     unbounded_channel,
     UnboundedReceiver as Receiver,
     UnboundedSender as Sender,
 };
-#[cfg(all(feature = "tokio_compat", not(feature = "tokio")))]
-use tokio::time::{delay_for as sleep, Delay as Sleep};
-#[cfg(feature = "tokio")]
 use tokio::time::{sleep, Sleep};
 
-use crate::{client::bridge::gateway::ShardMessenger, collector::LazyArc, model::channel::Message};
+use crate::client::bridge::gateway::ShardMessenger;
+use crate::collector::LazyArc;
+use crate::model::channel::Message;
 
 macro_rules! impl_message_collector {
     ($($name:ident;)*) => {
         $(
-            impl<'a> $name<'a> {
+            impl $name {
                 /// Limits how many messages will attempt to be filtered.
                 ///
                 /// The filter checks whether the message has been sent
                 /// in the right guild, channel, and by the right author.
+                #[must_use]
                 pub fn filter_limit(mut self, limit: u32) -> Self {
                     self.filter.as_mut().unwrap().filter_limit = Some(limit);
 
@@ -43,6 +39,7 @@ macro_rules! impl_message_collector {
                 /// This is the last instance to pass for a message to count as *collected*.
                 ///
                 /// This function is intended to be a message content filter.
+                #[must_use]
                 pub fn filter<F: Fn(&Arc<Message>) -> bool + 'static + Send + Sync>(mut self, function: F) -> Self {
                     self.filter.as_mut().unwrap().filter = Some(Arc::new(function));
 
@@ -51,6 +48,7 @@ macro_rules! impl_message_collector {
 
                 /// Sets the required author ID of a message.
                 /// If a message does not meet this ID, it won't be received.
+                #[must_use]
                 pub fn author_id(mut self, author_id: impl Into<u64>) -> Self {
                     self.filter.as_mut().unwrap().author_id = Some(author_id.into());
 
@@ -59,6 +57,7 @@ macro_rules! impl_message_collector {
 
                 /// Sets the required channel ID of a message.
                 /// If a message does not meet this ID, it won't be received.
+                #[must_use]
                 pub fn channel_id(mut self, channel_id: impl Into<u64>) -> Self {
                     self.filter.as_mut().unwrap().channel_id = Some(channel_id.into());
 
@@ -67,6 +66,7 @@ macro_rules! impl_message_collector {
 
                 /// Sets the required guild ID of a message.
                 /// If a message does not meet this ID, it won't be received.
+                #[must_use]
                 pub fn guild_id(mut self, guild_id: impl Into<u64>) -> Self {
                     self.filter.as_mut().unwrap().guild_id = Some(guild_id.into());
 
@@ -75,6 +75,7 @@ macro_rules! impl_message_collector {
 
                 /// Sets a `duration` for how long the collector shall receive
                 /// messages.
+                #[must_use]
                 pub fn timeout(mut self, duration: Duration) -> Self {
                     self.timeout = Some(Box::pin(sleep(duration)));
 
@@ -117,7 +118,7 @@ impl MessageFilter {
             if self.options.filter.as_ref().map_or(true, |f| f(&message.as_arc())) {
                 self.collected += 1;
 
-                if let Err(_) = self.sender.send(message.as_arc()) {
+                if self.sender.send(message.as_arc()).is_err() {
                     return false;
                 }
             }
@@ -130,7 +131,7 @@ impl MessageFilter {
 
     /// Checks if the `message` passes set constraints.
     /// Constraints are optional, as it is possible to limit messages to
-    /// be sent by a specific author or in a specifc guild.
+    /// be sent by a specific author or in a specific guild.
     fn is_passing_constraints(&self, message: &Message) -> bool {
         self.options.guild_id.map_or(true, |g| Some(g) == message.guild_id.map(|g| g.0))
             && self.options.channel_id.map_or(true, |g| g == message.channel_id.0)
@@ -150,7 +151,7 @@ impl MessageFilter {
 struct FilterOptions {
     filter_limit: Option<u32>,
     collect_limit: Option<u32>,
-    filter: Option<Arc<dyn Fn(&Arc<Message>) -> bool + 'static + Send + Sync>>,
+    filter: Option<super::FilterFn<Message>>,
     channel_id: Option<u64>,
     guild_id: Option<u64>,
     author_id: Option<u64>,
@@ -163,21 +164,19 @@ impl_message_collector! {
 }
 
 /// Future building a stream of messages.
-pub struct MessageCollectorBuilder<'a> {
+pub struct MessageCollectorBuilder {
     filter: Option<FilterOptions>,
     shard: Option<ShardMessenger>,
     timeout: Option<Pin<Box<Sleep>>>,
-    fut: Option<BoxFuture<'a, MessageCollector>>,
 }
 
-impl<'a> MessageCollectorBuilder<'a> {
+impl MessageCollectorBuilder {
     /// A future that builds a [`MessageCollector`] based on the settings.
     pub fn new(shard_messenger: impl AsRef<ShardMessenger>) -> Self {
         Self {
             filter: Some(FilterOptions::default()),
             shard: Some(shard_messenger.as_ref().clone()),
             timeout: None,
-            fut: None,
         }
     }
 
@@ -186,44 +185,38 @@ impl<'a> MessageCollectorBuilder<'a> {
     /// A message is considered *collected*, if the message
     /// passes all the requirements.
     #[allow(clippy::unwrap_used)]
+    #[must_use]
     pub fn collect_limit(mut self, limit: u32) -> Self {
         self.filter.as_mut().unwrap().collect_limit = Some(limit);
 
         self
     }
-}
 
-impl<'a> Future for MessageCollectorBuilder<'a> {
-    type Output = MessageCollector;
+    /// Use the given configuration to build the [`MessageCollector`].
     #[allow(clippy::unwrap_used)]
-    fn poll(mut self: Pin<&mut Self>, ctx: &mut FutContext<'_>) -> Poll<Self::Output> {
-        if self.fut.is_none() {
-            let shard_messenger = self.shard.take().unwrap();
-            let (filter, receiver) = MessageFilter::new(self.filter.take().unwrap());
-            let timeout = self.timeout.take();
+    #[must_use]
+    pub fn build(self) -> MessageCollector {
+        let shard_messenger = self.shard.unwrap();
+        let (filter, receiver) = MessageFilter::new(self.filter.unwrap());
+        let timeout = self.timeout;
 
-            self.fut = Some(Box::pin(async move {
-                shard_messenger.set_message_filter(filter);
+        shard_messenger.set_message_filter(filter);
 
-                MessageCollector {
-                    receiver: Box::pin(receiver),
-                    timeout,
-                }
-            }))
+        MessageCollector {
+            receiver: Box::pin(receiver),
+            timeout,
         }
-
-        self.fut.as_mut().unwrap().as_mut().poll(ctx)
     }
 }
 
-pub struct CollectReply<'a> {
+pub struct CollectReply {
     filter: Option<FilterOptions>,
     shard: Option<ShardMessenger>,
     timeout: Option<Pin<Box<Sleep>>>,
-    fut: Option<BoxFuture<'a, Option<Arc<Message>>>>,
+    fut: Option<BoxFuture<'static, Option<Arc<Message>>>>,
 }
 
-impl<'a> CollectReply<'a> {
+impl CollectReply {
     pub fn new(shard_messenger: impl AsRef<ShardMessenger>) -> Self {
         Self {
             filter: Some(FilterOptions::default()),
@@ -234,7 +227,7 @@ impl<'a> CollectReply<'a> {
     }
 }
 
-impl<'a> Future for CollectReply<'a> {
+impl Future for CollectReply {
     type Output = Option<Arc<Message>>;
     #[allow(clippy::unwrap_used)]
     fn poll(mut self: Pin<&mut Self>, ctx: &mut FutContext<'_>) -> Poll<Self::Output> {
@@ -252,18 +245,18 @@ impl<'a> Future for CollectReply<'a> {
                 }
                 .next()
                 .await
-            }))
+            }));
         }
 
         self.fut.as_mut().unwrap().as_mut().poll(ctx)
     }
 }
 
-impl std::fmt::Debug for FilterOptions {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Debug for FilterOptions {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("MessageFilter")
             .field("collect_limit", &self.collect_limit)
-            .field("filter", &"Option<Arc<dyn Fn(&Arc<Message>) -> bool + 'static + Send + Sync>>")
+            .field("filter", &"Option<super::FilterFn<Message>>")
             .field("channel_id", &self.channel_id)
             .field("guild_id", &self.guild_id)
             .field("author_id", &self.author_id)

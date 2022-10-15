@@ -1,37 +1,28 @@
-use std::{
-    boxed::Box,
-    future::Future,
-    pin::Pin,
-    sync::Arc,
-    task::{Context as FutContext, Poll},
-    time::Duration,
-};
+use std::fmt;
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::Arc;
+use std::task::{Context as FutContext, Poll};
+use std::time::Duration;
 
-use futures::{
-    future::BoxFuture,
-    stream::{Stream, StreamExt},
-};
+use futures::future::BoxFuture;
+use futures::stream::{Stream, StreamExt};
 use tokio::sync::mpsc::{
     unbounded_channel,
     UnboundedReceiver as Receiver,
     UnboundedSender as Sender,
 };
-#[cfg(all(feature = "tokio_compat", not(feature = "tokio")))]
-use tokio::time::{delay_for as sleep, Delay as Sleep};
-#[cfg(feature = "tokio")]
 use tokio::time::{sleep, Sleep};
 
-use crate::{
-    client::bridge::gateway::ShardMessenger,
-    collector::LazyArc,
-    model::channel::Reaction,
-    model::id::UserId,
-};
+use crate::client::bridge::gateway::ShardMessenger;
+use crate::collector::LazyArc;
+use crate::model::channel::Reaction;
+use crate::model::id::UserId;
 
 macro_rules! impl_reaction_collector {
     ($($name:ident;)*) => {
         $(
-            impl<'a> $name<'a> {
+            impl $name {
                 /// Limits how many messages will attempt to be filtered.
                 ///
                 /// The filter checks whether the message has been sent
@@ -133,27 +124,21 @@ pub enum ReactionAction {
 }
 
 impl ReactionAction {
+    #[must_use]
     pub fn as_inner_ref(&self) -> &Arc<Reaction> {
         match self {
-            Self::Added(inner) => inner,
-            Self::Removed(inner) => inner,
+            Self::Added(inner) | Self::Removed(inner) => inner,
         }
     }
 
+    #[must_use]
     pub fn is_added(&self) -> bool {
-        if let Self::Added(_) = &self {
-            true
-        } else {
-            false
-        }
+        matches!(self, Self::Added(_))
     }
 
+    #[must_use]
     pub fn is_removed(&self) -> bool {
-        if let Self::Removed(_) = &self {
-            true
-        } else {
-            false
-        }
+        matches!(self, Self::Removed(_))
     }
 }
 
@@ -230,7 +215,7 @@ impl ReactionFilter {
 
     /// Checks if the `reaction` passes set constraints.
     /// Constraints are optional, as it is possible to limit reactions to
-    /// be sent by a specific author or in a specifc guild.
+    /// be sent by a specific author or in a specific guild.
     fn is_passing_constraints(&self, reaction: &mut LazyReactionAction<'_>) -> bool {
         let reaction = match (reaction.added, &mut reaction.reaction) {
             (true, reaction) => {
@@ -273,7 +258,7 @@ impl ReactionFilter {
 struct FilterOptions {
     filter_limit: Option<u32>,
     collect_limit: Option<u32>,
-    filter: Option<Arc<dyn Fn(&Arc<Reaction>) -> bool + 'static + Send + Sync>>,
+    filter: Option<super::FilterFn<Reaction>>,
     channel_id: Option<u64>,
     guild_id: Option<u64>,
     author_id: Option<u64>,
@@ -306,55 +291,48 @@ impl_reaction_collector! {
     ReactionCollectorBuilder;
 }
 
-pub struct ReactionCollectorBuilder<'a> {
+#[must_use = "builders do nothing until built"]
+pub struct ReactionCollectorBuilder {
     filter: Option<FilterOptions>,
     shard: Option<ShardMessenger>,
     timeout: Option<Pin<Box<Sleep>>>,
-    fut: Option<BoxFuture<'a, ReactionCollector>>,
 }
 
-impl<'a> ReactionCollectorBuilder<'a> {
+impl ReactionCollectorBuilder {
     pub fn new(shard_messenger: impl AsRef<ShardMessenger>) -> Self {
         Self {
             filter: Some(FilterOptions::default()),
             shard: Some(shard_messenger.as_ref().clone()),
             timeout: None,
-            fut: None,
         }
     }
-}
 
-impl<'a> Future for ReactionCollectorBuilder<'a> {
-    type Output = ReactionCollector;
+    /// Use the given configuration to build the [`ReactionCollector`].
     #[allow(clippy::unwrap_used)]
-    fn poll(mut self: Pin<&mut Self>, ctx: &mut FutContext<'_>) -> Poll<Self::Output> {
-        if self.fut.is_none() {
-            let shard_messenger = self.shard.take().unwrap();
-            let (filter, receiver) = ReactionFilter::new(self.filter.take().unwrap());
-            let timeout = self.timeout.take();
+    #[must_use]
+    pub fn build(self) -> ReactionCollector {
+        let shard_messenger = self.shard.unwrap();
+        let (filter, receiver) = ReactionFilter::new(self.filter.unwrap());
+        let timeout = self.timeout;
 
-            self.fut = Some(Box::pin(async move {
-                shard_messenger.set_reaction_filter(filter);
+        shard_messenger.set_reaction_filter(filter);
 
-                ReactionCollector {
-                    receiver: Box::pin(receiver),
-                    timeout,
-                }
-            }))
+        ReactionCollector {
+            receiver: Box::pin(receiver),
+            timeout,
         }
-
-        self.fut.as_mut().unwrap().as_mut().poll(ctx)
     }
 }
 
-pub struct CollectReaction<'a> {
+#[must_use = "builders do nothing unless awaited"]
+pub struct CollectReaction {
     filter: Option<FilterOptions>,
     shard: Option<ShardMessenger>,
     timeout: Option<Pin<Box<Sleep>>>,
-    fut: Option<BoxFuture<'a, Option<Arc<ReactionAction>>>>,
+    fut: Option<BoxFuture<'static, Option<Arc<ReactionAction>>>>,
 }
 
-impl<'a> CollectReaction<'a> {
+impl CollectReaction {
     pub fn new(shard_messenger: impl AsRef<ShardMessenger>) -> Self {
         Self {
             filter: Some(FilterOptions::default()),
@@ -365,7 +343,7 @@ impl<'a> CollectReaction<'a> {
     }
 }
 
-impl<'a> Future for CollectReaction<'a> {
+impl Future for CollectReaction {
     type Output = Option<Arc<ReactionAction>>;
     #[allow(clippy::unwrap_used)]
     fn poll(mut self: Pin<&mut Self>, ctx: &mut FutContext<'_>) -> Poll<Self::Output> {
@@ -383,18 +361,18 @@ impl<'a> Future for CollectReaction<'a> {
                 }
                 .next()
                 .await
-            }))
+            }));
         }
 
         self.fut.as_mut().unwrap().as_mut().poll(ctx)
     }
 }
 
-impl std::fmt::Debug for FilterOptions {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Debug for FilterOptions {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ReactionFilter")
             .field("collect_limit", &self.collect_limit)
-            .field("filter", &"Option<Arc<dyn Fn(&Arc<Reaction>) -> bool + 'static + Send + Sync>>")
+            .field("filter", &"Option<super::FilterFn<Reaction>>")
             .field("channel_id", &self.channel_id)
             .field("guild_id", &self.guild_id)
             .field("author_id", &self.author_id)

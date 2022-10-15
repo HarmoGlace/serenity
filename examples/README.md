@@ -20,6 +20,7 @@ To run an example, you have various options:
 
 1. [cargo-make](https://lib.rs/crates/cargo-make)
 
+- Install cargo-make `cargo install --force cargo-make`
 - Clone the repository: `git clone https://github.com/serenity-rs/serenity.git`
 - CD into the serenity folder: `cd serenity`
 - Run `cargo make 1`, where 1 is the number of the example you wish to run; these are:
@@ -32,7 +33,7 @@ To run an example, you have various options:
     5 => Command Framework: The main example, where it's demonstrated how to use serenity's command framework,
     along with most of its utilities.
     This example also shows how to share data between events and commands, using `Context.data`
-    6 => Simple Bot Stucture: An example showing the recommended file structure to use.
+    6 => Simple Bot Structure: An example showing the recommended file structure to use.
     7 => Env Logging: How to use the tracing crate along with serenity.
     8 => Shard Manager: How to get started with using the shard manager.
     9 => Create Message Builder: How to send embeds and files.
@@ -43,6 +44,9 @@ To run an example, you have various options:
     Additionally, show how to send a message to a specific channel.
     14 => Slash Commands: How to use the low level slash command API.
     15 => Simple Dashboard: A simple dashboard to control and monitor the bot with `rillrate`.
+    16 => SQLite Database: How to run an embedded SQLite database alongside the bot using SQLx
+    17 => Message Components: How to structure and use buttons and select menus
+    18 => Webhook: How to construct and call a webhook
     ```
 
 2. Manually running:
@@ -70,4 +74,3 @@ If you add a new example also add it to the following files:
 - `.github/workflows/ci.yml`
 - `Makefile.toml`
 - `examples/README.md`
-- `Cargo.toml` -> `workspace.members`

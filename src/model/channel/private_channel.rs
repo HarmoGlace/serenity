@@ -1,18 +1,20 @@
-use std::fmt::{Display, Formatter, Result as FmtResult};
+use std::fmt;
 #[cfg(feature = "model")]
 use std::sync::Arc;
 
-use chrono::{DateTime, Utc};
-
 #[cfg(feature = "model")]
 use crate::builder::{CreateMessage, EditMessage, GetMessages};
-#[cfg(feature = "model")]
-use crate::http::AttachmentType;
 #[cfg(feature = "http")]
 use crate::http::{Http, Typing};
+#[cfg(feature = "model")]
+use crate::model::channel::AttachmentType;
 use crate::model::prelude::*;
+use crate::model::utils::single_recipient;
+use crate::model::Timestamp;
 
 /// A Direct Message text channel with another user.
+///
+/// [Discord docs](https://discord.com/developers/docs/resources/channel#channel-object).
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct PrivateChannel {
@@ -23,18 +25,14 @@ pub struct PrivateChannel {
     /// The Id of the last message sent.
     pub last_message_id: Option<MessageId>,
     /// Timestamp of the last time a [`Message`] was pinned.
-    pub last_pin_timestamp: Option<DateTime<Utc>>,
+    pub last_pin_timestamp: Option<Timestamp>,
     /// Indicator of the type of channel this is.
     ///
     /// This should always be [`ChannelType::Private`].
     #[serde(rename = "type")]
     pub kind: ChannelType,
     /// The recipient to the private channel.
-    #[serde(
-        deserialize_with = "deserialize_single_recipient",
-        serialize_with = "serialize_single_recipient",
-        rename = "recipients"
-    )]
+    #[serde(with = "single_recipient", rename = "recipients")]
     pub recipient: User,
 }
 
@@ -43,8 +41,6 @@ impl PrivateChannel {
     /// Broadcasts that the current user is typing to the recipient.
     ///
     /// See [ChannelId::broadcast_typing] for more details.
-    ///
-    /// [`ChannelId::broadcast_typing`]: crate::model::channel::ChannelId::broadcast_typing
     #[allow(clippy::missing_errors_doc)]
     #[inline]
     pub async fn broadcast_typing(&self, http: impl AsRef<Http>) -> Result<()> {
@@ -95,7 +91,7 @@ impl PrivateChannel {
     ///
     /// [Manage Messages]: Permissions::MANAGE_MESSAGES
     #[inline]
-    pub async fn delete_messages<T: AsRef<MessageId>, It: IntoIterator<Item = T>>(
+    pub async fn delete_messages<T, It>(
         &self,
         http: impl AsRef<Http>,
         message_ids: It,
@@ -160,17 +156,16 @@ impl PrivateChannel {
     ///
     /// Returns [`Error::Http`] if the current user is not the owner of the message.
     ///
-    /// [`EditMessage`]: crate::builder::EditMessage
     /// [`the limit`]: crate::builder::EditMessage::content
     #[inline]
-    pub async fn edit_message<F>(
+    pub async fn edit_message<'a, F>(
         &self,
         http: impl AsRef<Http>,
         message_id: impl Into<MessageId>,
         f: F,
     ) -> Result<Message>
     where
-        F: FnOnce(&mut EditMessage) -> &mut EditMessage,
+        F: for<'b> FnOnce(&'b mut EditMessage<'a>) -> &'b mut EditMessage<'a>,
     {
         self.id.edit_message(&http, message_id, f).await
     }
@@ -180,6 +175,8 @@ impl PrivateChannel {
     /// **Note**: This method is for consistency. This will always return
     /// `false`, due to DMs not being considered NSFW.
     #[inline]
+    #[must_use]
+    #[allow(clippy::unused_self)]
     pub fn is_nsfw(&self) -> bool {
         false
     }
@@ -206,8 +203,6 @@ impl PrivateChannel {
     /// # Errors
     ///
     /// Returns [`Error::Http`] if an invalid value is set in the builder.
-    ///
-    /// [`GetMessages`]: crate::builder::GetMessages
     #[inline]
     pub async fn messages<F>(&self, http: impl AsRef<Http>, builder: F) -> Result<Vec<Message>>
     where
@@ -217,6 +212,7 @@ impl PrivateChannel {
     }
 
     /// Returns "DM with $username#discriminator".
+    #[must_use]
     pub fn name(&self) -> String {
         format!("DM with {}", self.recipient.tag())
     }
@@ -278,11 +274,7 @@ impl PrivateChannel {
     /// is over the above limit, containing the number of unicode code points
     /// over the limit.
     #[inline]
-    pub async fn say(
-        &self,
-        http: impl AsRef<Http>,
-        content: impl std::fmt::Display,
-    ) -> Result<Message> {
+    pub async fn say(&self, http: impl AsRef<Http>, content: impl fmt::Display) -> Result<Message> {
         self.id.say(&http, content).await
     }
 
@@ -326,8 +318,6 @@ impl PrivateChannel {
     /// Returns a [`ModelError::MessageTooLong`] if the content of the message
     /// is over the above limit, containing the number of unicode code points
     /// over the limit.
-    ///
-    /// [`CreateMessage`]: crate::builder::CreateMessage
     #[inline]
     pub async fn send_message<'a, F>(&self, http: impl AsRef<Http>, f: F) -> Result<Message>
     where
@@ -363,10 +353,9 @@ impl PrivateChannel {
     /// # use std::sync::Arc;
     /// #
     /// # fn long_process() {}
-    /// # let http = Arc::new(Http::default());
+    /// # let http = Arc::new(Http::new("token"));
     /// # let cache = Cache::default();
     /// # let channel = cache.private_channel(ChannelId(7))
-    /// #    .await
     /// #    .ok_or(ModelError::ItemMissing)?;
     /// // Initiate typing (assuming http is `Arc<Http>` and `channel` is bound)
     /// let typing = channel.start_typing(&http)?;
@@ -406,9 +395,9 @@ impl PrivateChannel {
     }
 }
 
-impl Display for PrivateChannel {
+impl fmt::Display for PrivateChannel {
     /// Formats the private channel, displaying the recipient's username.
-    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.recipient.name)
     }
 }

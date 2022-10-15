@@ -1,27 +1,26 @@
 //! This example will showcase the beauty of collectors.
 //! They allow to await messages or reactions from a user in the middle
 //! of a control flow, one being a command.
-use std::{collections::HashSet, env, time::Duration};
+use std::collections::HashSet;
+use std::env;
+use std::time::Duration;
 
-use serenity::{
-    async_trait,
-    collector::{EventCollectorBuilder, MessageCollectorBuilder},
-    framework::standard::{
-        help_commands,
-        macros::{command, group, help},
-        Args,
-        CommandGroup,
-        CommandResult,
-        HelpOptions,
-        StandardFramework,
-    },
-    // Collectors are streams, that means we can use `StreamExt` and
-    // `TryStreamExt`.
-    futures::stream::StreamExt,
-    http::Http,
-    model::prelude::*,
-    prelude::*,
+use serenity::async_trait;
+use serenity::collector::{EventCollectorBuilder, MessageCollectorBuilder};
+use serenity::framework::standard::macros::{command, group, help};
+use serenity::framework::standard::{
+    help_commands,
+    Args,
+    CommandGroup,
+    CommandResult,
+    HelpOptions,
+    StandardFramework,
 };
+// Collectors are streams, that means we can use `StreamExt` and `TryStreamExt`.
+use serenity::futures::stream::StreamExt;
+use serenity::http::Http;
+use serenity::model::prelude::*;
+use serenity::prelude::*;
 
 #[group("collector")]
 #[commands(challenge)]
@@ -54,12 +53,12 @@ async fn main() {
     // Configure the client with your Discord bot token in the environment.
     let token = env::var("DISCORD_TOKEN").expect("Expected a token in the environment");
 
-    let http = Http::new_with_token(&token);
+    let http = Http::new(&token);
 
     // We will fetch your bot's id.
-    let bot_id = match http.get_current_application_info().await {
+    let bot_id = match http.get_current_user().await {
         Ok(info) => info.id,
-        Err(why) => panic!("Could not access application info: {:?}", why),
+        Err(why) => panic!("Could not access user info: {:?}", why),
     };
 
     let framework = StandardFramework::new()
@@ -69,7 +68,12 @@ async fn main() {
         .help(&MY_HELP)
         .group(&COLLECTOR_GROUP);
 
-    let mut client = Client::builder(&token)
+    let intents = GatewayIntents::GUILD_MESSAGES
+        | GatewayIntents::DIRECT_MESSAGES
+        | GatewayIntents::MESSAGE_CONTENT
+        | GatewayIntents::GUILD_MESSAGE_REACTIONS;
+
+    let mut client = Client::builder(&token, intents)
         .event_handler(Handler)
         .framework(framework)
         .await
@@ -141,7 +145,7 @@ async fn challenge(ctx: &Context, msg: &Message, _: Args) -> CommandResult {
         .collect_limit(5u32)
         .timeout(Duration::from_secs(10))
     // Build the collector.
-        .await;
+        .build();
 
     // Let's acquire borrow HTTP to send a message inside the `async move`.
     let http = &ctx.http;
@@ -173,7 +177,8 @@ async fn challenge(ctx: &Context, msg: &Message, _: Args) -> CommandResult {
         .add_event_type(EventType::MessageUpdate)
         .timeout(Duration::from_secs(20));
     // Only collect MessageUpdate events for the 5 MessageIds we're interested in.
-    let mut collector = collected.iter().fold(builder, |b, msg| b.add_message_id(msg.id)).await?;
+    let mut collector =
+        collected.iter().fold(builder, |b, msg| b.add_message_id(msg.id)).build()?;
 
     let _ = msg.reply(ctx, "Edit each of those 5 messages in 20 seconds").await;
     let mut edited = HashSet::new();

@@ -1,15 +1,12 @@
 use std::env;
 
-use serenity::{
-    async_trait,
-    framework::standard::{
-        macros::{command, group, hook},
-        CommandResult,
-        StandardFramework,
-    },
-    model::{channel::Message, event::ResumedEvent, gateway::Ready},
-    prelude::*,
-};
+use serenity::async_trait;
+use serenity::framework::standard::macros::{command, group, hook};
+use serenity::framework::standard::{CommandResult, StandardFramework};
+use serenity::model::channel::Message;
+use serenity::model::event::ResumedEvent;
+use serenity::model::gateway::Ready;
+use serenity::prelude::*;
 use tracing::{debug, error, info, instrument};
 
 struct Handler;
@@ -72,7 +69,10 @@ async fn main() {
     let framework =
         StandardFramework::new().configure(|c| c.prefix("~")).before(before).group(&GENERAL_GROUP);
 
-    let mut client = Client::builder(&token)
+    let intents = GatewayIntents::GUILD_MESSAGES
+        | GatewayIntents::DIRECT_MESSAGES
+        | GatewayIntents::MESSAGE_CONTENT;
+    let mut client = Client::builder(&token, intents)
         .event_handler(Handler)
         .framework(framework)
         .await

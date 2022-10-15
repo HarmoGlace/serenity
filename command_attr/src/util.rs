@@ -1,16 +1,15 @@
 use proc_macro::TokenStream;
-use proc_macro2::Span;
-use proc_macro2::TokenStream as TokenStream2;
+use proc_macro2::{Span, TokenStream as TokenStream2};
 use quote::{format_ident, quote, ToTokens};
+use syn::parse::{Error, Parse, ParseStream, Result as SynResult};
+use syn::punctuated::Punctuated;
+use syn::spanned::Spanned;
+use syn::token::{Comma, Mut};
 use syn::{
     braced,
     bracketed,
     parenthesized,
-    parse::{Error, Parse, ParseStream, Result as SynResult},
     parse_quote,
-    punctuated::Punctuated,
-    spanned::Spanned,
-    token::{Comma, Mut},
     Attribute,
     Ident,
     Lifetime,
@@ -31,10 +30,10 @@ pub trait LitExt {
 impl LitExt for Lit {
     fn to_str(&self) -> String {
         match self {
-            Lit::Str(s) => s.value(),
-            Lit::ByteStr(s) => unsafe { String::from_utf8_unchecked(s.value()) },
-            Lit::Char(c) => c.value().to_string(),
-            Lit::Byte(b) => (b.value() as char).to_string(),
+            Self::Str(s) => s.value(),
+            Self::ByteStr(s) => unsafe { String::from_utf8_unchecked(s.value()) },
+            Self::Char(c) => c.value().to_string(),
+            Self::Byte(b) => (b.value() as char).to_string(),
             _ => panic!("values must be a (byte)string or a char"),
         }
     }
@@ -54,24 +53,32 @@ impl LitExt for Lit {
 }
 
 pub trait IdentExt2: Sized {
+    fn to_string_non_raw(&self) -> String;
     fn to_uppercase(&self) -> Self;
     fn with_suffix(&self, suf: &str) -> Ident;
 }
 
 impl IdentExt2 for Ident {
     #[inline]
+    fn to_string_non_raw(&self) -> String {
+        let ident_string = self.to_string();
+        ident_string.trim_start_matches("r#").into()
+    }
+
+    #[inline]
     fn to_uppercase(&self) -> Self {
-        format_ident!("{}", self.to_string().to_uppercase())
+        // This should be valid because keywords are lowercase.
+        format_ident!("{}", self.to_string_non_raw().to_uppercase())
     }
 
     #[inline]
     fn with_suffix(&self, suffix: &str) -> Ident {
-        format_ident!("{}_{}", self.to_string().to_uppercase(), suffix)
+        format_ident!("{}_{}", self.to_uppercase(), suffix)
     }
 }
 
 #[inline]
-pub fn into_stream(e: Error) -> TokenStream {
+pub fn into_stream(e: &Error) -> TokenStream {
     e.to_compile_error().into()
 }
 
@@ -79,7 +86,7 @@ macro_rules! propagate_err {
     ($res:expr) => {{
         match $res {
             Ok(v) => v,
-            Err(e) => return $crate::util::into_stream(e),
+            Err(e) => return $crate::util::into_stream(&e),
         }
     }};
 }
@@ -168,7 +175,7 @@ impl ToTokens for Argument {
 }
 
 #[inline]
-pub fn generate_type_validation(have: Type, expect: Type) -> syn::Stmt {
+pub fn generate_type_validation(have: &Type, expect: &Type) -> syn::Stmt {
     parse_quote! {
         serenity::static_assertions::assert_type_eq_all!(#have, #expect);
     }
@@ -208,7 +215,7 @@ pub fn create_declaration_validations(fun: &mut CommandFun, dec_for: DeclarFor) 
 
     let mut spoof_or_check = |kind: Type, name: &str| {
         match fun.args.get(index) {
-            Some(x) => fun.body.insert(0, generate_type_validation(x.kind.clone(), kind)),
+            Some(x) => fun.body.insert(0, generate_type_validation(&x.kind, &kind)),
             None => fun.args.push(Argument {
                 mutable: None,
                 name: Ident::new(name, Span::call_site()),
@@ -241,8 +248,8 @@ pub fn create_declaration_validations(fun: &mut CommandFun, dec_for: DeclarFor) 
 }
 
 #[inline]
-pub fn create_return_type_validation(r#fn: &mut CommandFun, expect: Type) {
-    let stmt = generate_type_validation(r#fn.ret.clone(), expect);
+pub fn create_return_type_validation(r#fn: &mut CommandFun, expect: &Type) {
+    let stmt = generate_type_validation(&r#fn.ret, expect);
     r#fn.body.insert(0, stmt);
 }
 
@@ -271,14 +278,11 @@ pub fn append_line(desc: &mut AsOption<String>, mut line: String) {
 
     let desc = desc.0.get_or_insert_with(String::default);
 
-    match line.rfind("\\$") {
-        Some(i) => {
-            desc.push_str(line[..i].trim_end());
-            desc.push(' ');
-        },
-        None => {
-            desc.push_str(&line);
-            desc.push('\n');
-        },
+    if let Some(i) = line.rfind("\\$") {
+        desc.push_str(line[..i].trim_end());
+        desc.push(' ');
+    } else {
+        desc.push_str(&line);
+        desc.push('\n');
     }
 }

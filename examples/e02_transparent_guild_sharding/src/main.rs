@@ -1,13 +1,12 @@
 use std::env;
 
-use serenity::{
-    async_trait,
-    model::{channel::Message, gateway::Ready},
-    prelude::*,
-};
+use serenity::async_trait;
+use serenity::model::channel::Message;
+use serenity::model::gateway::Ready;
+use serenity::prelude::*;
 
 // Serenity implements transparent sharding in a way that you do not need to
-// manually handle separate processes or connections manually.
+// handle separate processes or connections manually.
 //
 // Transparent sharding is useful for a shared cache. Instead of having caches
 // with duplicated data, a shared cache means all your data can be easily
@@ -47,8 +46,11 @@ impl EventHandler for Handler {
 async fn main() {
     // Configure the client with your Discord bot token in the environment.
     let token = env::var("DISCORD_TOKEN").expect("Expected a token in the environment");
+    let intents = GatewayIntents::GUILD_MESSAGES
+        | GatewayIntents::DIRECT_MESSAGES
+        | GatewayIntents::MESSAGE_CONTENT;
     let mut client =
-        Client::builder(&token).event_handler(Handler).await.expect("Err creating client");
+        Client::builder(&token, intents).event_handler(Handler).await.expect("Err creating client");
 
     // The total number of shards to use. The "current shard number" of a
     // shard - that is, the shard it is assigned to - is indexed at 0,

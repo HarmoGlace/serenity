@@ -4,8 +4,11 @@ use reqwest::Client as ReqwestClient;
 #[cfg(feature = "model")]
 use crate::internal::prelude::*;
 use crate::model::id::AttachmentId;
+use crate::model::utils::is_false;
 
 /// A file uploaded with a message. Not to be confused with [`Embed`]s.
+///
+/// [Discord docs](https://discord.com/developers/docs/resources/channel#attachment-object).
 ///
 /// [`Embed`]: super::Embed
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -30,12 +33,21 @@ pub struct Attachment {
     ///
     /// [media type]: https://en.wikipedia.org/wiki/Media_type
     pub content_type: Option<String>,
+    /// Whether this attachment is ephemeral.
+    ///
+    /// Ephemeral attachments will automatically be removed after a set period of time.
+    ///
+    /// Ephemeral attachments on messages are guaranteed to be available as long as
+    /// the message itself exists.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub ephemeral: bool,
 }
 
 #[cfg(feature = "model")]
 impl Attachment {
     /// If this attachment is an image, then a tuple of the width and height
     /// in pixels is returned.
+    #[must_use]
     pub fn dimensions(&self) -> Option<(u64, u64)> {
         self.width.and_then(|width| self.height.map(|height| (width, height)))
     }
@@ -49,12 +61,13 @@ impl Attachment {
     /// ```rust,no_run
     /// # #[cfg(feature = "client")]
     /// # async fn run() -> Result<(), Box<dyn std::error::Error>> {
+    /// use std::io::Write;
+    /// use std::path::Path;
+    ///
     /// use serenity::model::prelude::*;
     /// use serenity::prelude::*;
     /// use tokio::fs::File;
     /// use tokio::io::AsyncWriteExt;
-    /// use std::io::Write;
-    /// use std::path::Path;
     ///
     /// struct Handler;
     ///
@@ -66,7 +79,8 @@ impl Attachment {
     ///                 Ok(content) => content,
     ///                 Err(why) => {
     ///                     println!("Error downloading attachment: {:?}", why);
-    ///                     let _ = message.channel_id.say(&context, "Error downloading attachment").await;
+    ///                     let _ =
+    ///                         message.channel_id.say(&context, "Error downloading attachment").await;
     ///
     ///                     return;
     ///                 },
@@ -82,13 +96,16 @@ impl Attachment {
     ///                 },
     ///             };
     ///
-    ///             if let Err(why) = file.write(&content).await {
+    ///             if let Err(why) = file.write_all(&content).await {
     ///                 println!("Error writing to file: {:?}", why);
     ///
     ///                 return;
     ///             }
     ///
-    ///             let _ = message.channel_id.say(&context, &format!("Saved {:?}", attachment.filename)).await;
+    ///             let _ = message
+    ///                 .channel_id
+    ///                 .say(&context, &format!("Saved {:?}", attachment.filename))
+    ///                 .await;
     ///         }
     ///     }
     ///
@@ -97,7 +114,8 @@ impl Attachment {
     ///     }
     /// }
     /// let token = std::env::var("DISCORD_TOKEN")?;
-    /// let mut client = Client::builder(&token).event_handler(Handler).await?;
+    /// let mut client =
+    ///     Client::builder(&token, GatewayIntents::default()).event_handler(Handler).await?;
     ///
     /// client.start().await?;
     /// #     Ok(())
@@ -112,12 +130,10 @@ impl Attachment {
     /// Returns an [`Error::Http`] when there is a problem retrieving the
     /// attachment.
     ///
-    /// [`Error::Http`]: crate::Error::Http
-    /// [`Error::Io`]: crate::Error::Io
     /// [`Message`]: super::Message
     pub async fn download(&self) -> Result<Vec<u8>> {
         let reqwest = ReqwestClient::new();
-
-        Ok(reqwest.get(&self.url).send().await?.bytes().await?.into_iter().collect::<Vec<u8>>())
+        let bytes = reqwest.get(&self.url).send().await?.bytes().await?;
+        Ok(bytes.to_vec())
     }
 }

@@ -1,7 +1,11 @@
+use serde::{Deserialize, Serialize};
+
+use crate::model::application::interaction::InteractionType;
 use crate::model::id::{ApplicationId, InteractionId};
-use crate::model::interactions::InteractionType;
 
 /// A ping interaction, which can only be received through an endpoint url.
+///
+/// [Discord docs](https://discord.com/developers/docs/interactions/receiving-and-responding#interaction-object-interaction-structure).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct PingInteraction {
@@ -16,4 +20,6 @@ pub struct PingInteraction {
     pub token: String,
     /// Always `1`.
     pub version: u8,
+    /// The guild's preferred locale.
+    pub guild_locale: Option<String>,
 }

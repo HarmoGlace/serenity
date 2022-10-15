@@ -7,17 +7,19 @@ use std::sync::Arc;
 mod error;
 pub use error::Error as CollectorError;
 
-#[cfg(feature = "unstable_discord_api")]
 pub mod component_interaction_collector;
 pub mod event_collector;
 pub mod message_collector;
+pub mod modal_interaction_collector;
 pub mod reaction_collector;
 
-#[cfg(feature = "unstable_discord_api")]
 pub use component_interaction_collector::*;
 pub use event_collector::*;
 pub use message_collector::*;
+pub use modal_interaction_collector::*;
 pub use reaction_collector::*;
+
+type FilterFn<T> = Arc<dyn Fn(&Arc<T>) -> bool + 'static + Send + Sync>;
 
 /// Wraps a &T and clones the value into an Arc<T> lazily. Used with collectors to allow inspecting
 /// the value in filters while only cloning values that actually match.

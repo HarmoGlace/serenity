@@ -1,14 +1,17 @@
 use url::Url;
 
+#[cfg(feature = "http")]
 use crate::http::client::Http;
+#[cfg(feature = "http")]
 use crate::internal::prelude::*;
+use crate::model::application::oauth::Scope;
 use crate::model::prelude::*;
 
 /// A builder for constructing an invite link with custom OAuth2 scopes.
 #[derive(Debug, Clone, Default)]
 pub struct CreateBotAuthParameters {
-    client_id: UserId,
-    scopes: Vec<OAuth2Scope>,
+    client_id: ApplicationId,
+    scopes: Vec<Scope>,
     permissions: Permissions,
     guild_id: GuildId,
     disable_guild_select: bool,
@@ -16,6 +19,7 @@ pub struct CreateBotAuthParameters {
 
 impl CreateBotAuthParameters {
     /// Builds the url with the provided data.
+    #[must_use]
     pub fn build(self) -> String {
         let mut valid_data = vec![];
         let bits = self.permissions.bits();
@@ -27,7 +31,7 @@ impl CreateBotAuthParameters {
         if !self.scopes.is_empty() {
             valid_data.push((
                 "scope",
-                self.scopes.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(" "),
+                self.scopes.iter().map(ToString::to_string).collect::<Vec<_>>().join(" "),
             ));
         }
 
@@ -50,7 +54,7 @@ impl CreateBotAuthParameters {
     }
 
     /// Specify the client Id of your application.
-    pub fn client_id<U: Into<UserId>>(&mut self, client_id: U) -> &mut Self {
+    pub fn client_id<U: Into<ApplicationId>>(&mut self, client_id: U) -> &mut Self {
         self.client_id = client_id.into();
         self
     }
@@ -64,6 +68,7 @@ impl CreateBotAuthParameters {
     /// If the user is not authorized for this endpoint.
     ///
     /// [`HttpError::UnsuccessfulRequest`]: crate::http::HttpError::UnsuccessfulRequest
+    #[cfg(feature = "http")]
     pub async fn auto_client_id(&mut self, http: impl AsRef<Http>) -> Result<&mut Self> {
         self.client_id = http.as_ref().get_current_application_info().await.map(|v| v.id)?;
         Ok(self)
@@ -73,8 +78,8 @@ impl CreateBotAuthParameters {
     ///
     /// **Note**: This needs to include the [`Bot`] scope.
     ///
-    /// [`Bot`]: crate::model::oauth2::OAuth2Scope::Bot
-    pub fn scopes(&mut self, scopes: &[OAuth2Scope]) -> &mut Self {
+    /// [`Bot`]: Scope::Bot
+    pub fn scopes(&mut self, scopes: &[Scope]) -> &mut Self {
         self.scopes = scopes.to_vec();
         self
     }

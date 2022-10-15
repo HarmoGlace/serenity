@@ -1,7 +1,8 @@
 use std::borrow::Cow;
 use std::error::Error as StdError;
+use std::fmt;
 use std::marker::PhantomData;
-use std::{fmt, str::FromStr};
+use std::str::FromStr;
 
 use uwl::Stream;
 
@@ -23,11 +24,9 @@ impl<E> From<E> for Error<E> {
 
 impl<E: fmt::Display> fmt::Display for Error<E> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        use self::Error::*;
-
         match *self {
-            Eos => write!(f, "ArgError(\"end of string\")"),
-            Parse(ref e) => write!(f, "ArgError(\"{}\")", e),
+            Self::Eos => f.write_str(r#"ArgError("end of string")"#),
+            Self::Parse(ref e) => write!(f, "ArgError(\"{}\")", e),
         }
     }
 }
@@ -47,8 +46,8 @@ impl Delimiter {
     #[inline]
     fn to_str(&self) -> Cow<'_, str> {
         match self {
-            Delimiter::Single(c) => Cow::Owned(c.to_string()),
-            Delimiter::Multiple(s) => Cow::Borrowed(s),
+            Self::Single(c) => Cow::Owned(c.to_string()),
+            Self::Multiple(s) => Cow::Borrowed(s),
         }
     }
 }
@@ -82,6 +81,7 @@ impl<'a> From<&'a str> for Delimiter {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[allow(clippy::enum_variant_names)]
 enum TokenKind {
     Argument,
     QuotedArgument,
@@ -103,19 +103,54 @@ impl Token {
     }
 }
 
+// A utility enum to handle an edge case with Apple OSs.
+//
+// By default, a feature called "Smart Quotes" is enabled on MacOS and iOS devices. This feature
+// automatically substitutes the lame, but simple `"` ASCII character for quotation with the cool
+// `”` Unicode character. It can be disabled, but users may not want to do that as it is a global
+// setting (i.e. they might not want to disable it just for properly invoking commands of bots on
+// Discord).
+#[derive(Clone, Copy)]
+enum QuoteKind {
+    Ascii,
+    Apple,
+}
+
+impl QuoteKind {
+    fn new(c: char) -> Option<Self> {
+        match c {
+            '"' => Some(QuoteKind::Ascii),
+            '\u{201C}' => Some(QuoteKind::Apple),
+            _ => None,
+        }
+    }
+
+    fn is_ending_quote(self, c: char) -> bool {
+        match self {
+            Self::Ascii => c == '"',
+            Self::Apple => c == '\u{201D}',
+        }
+    }
+}
+
 fn lex(stream: &mut Stream<'_>, delims: &[Cow<'_, str>]) -> Option<Token> {
     if stream.is_empty() {
         return None;
     }
 
     let start = stream.offset();
-    if stream.current()? == b'"' {
-        stream.next();
+    if let Some(kind) = QuoteKind::new(stream.current_char()?) {
+        stream.next_char();
 
-        stream.take_until(|b| b == b'"');
+        let mut prev_was_backslash = false;
+        stream.take_until_char(|c| {
+            let result = kind.is_ending_quote(c) && !prev_was_backslash;
+            prev_was_backslash = c == '\\';
+            result
+        });
 
-        let is_quote = stream.current().map_or(false, |b| b == b'"');
-        stream.next();
+        let is_quote = stream.current_char().map_or(false, |c| kind.is_ending_quote(c));
+        stream.next_char();
 
         let end = stream.offset();
 
@@ -150,12 +185,35 @@ fn lex(stream: &mut Stream<'_>, delims: &[Cow<'_, str>]) -> Option<Token> {
     Some(Token::new(TokenKind::Argument, start, end))
 }
 
-fn remove_quotes(s: &str) -> &str {
-    if s.starts_with('"') && s.ends_with('"') {
-        return &s[1..s.len() - 1];
+fn is_surrounded_with(s: &str, begin: char, end: char) -> bool {
+    s.starts_with(begin) && s.ends_with(end)
+}
+
+fn is_quoted(s: &str) -> bool {
+    if s.len() < 2 {
+        return false;
     }
 
-    s
+    // Refer to `QuoteKind` why we check for Unicode quote characters.
+    is_surrounded_with(s, '"', '"') || is_surrounded_with(s, '\u{201C}', '\u{201D}')
+}
+
+fn strip(s: &str, begin: char, end: char) -> Option<&str> {
+    let s = s.strip_prefix(begin)?;
+    s.strip_suffix(end)
+}
+
+fn remove_quotes(s: &str) -> &str {
+    if s.len() < 2 {
+        return s;
+    }
+
+    if let Some(s) = strip(s, '"', '"') {
+        return s;
+    }
+
+    // Refer to `QuoteKind` why we check for Unicode quote characters.
+    strip(s, '\u{201C}', '\u{201D}').unwrap_or(s)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -288,6 +346,7 @@ impl Args {
     /// // We shall not see `the quick brown` again.
     /// assert_eq!(args.rest(), "fox jumps over the lazy");
     /// ```
+    #[must_use]
     pub fn new(message: &str, possible_delimiters: &[Delimiter]) -> Self {
         let delims = possible_delimiters
             .iter()
@@ -295,18 +354,20 @@ impl Args {
                 Delimiter::Single(c) => message.contains(*c),
                 Delimiter::Multiple(s) => message.contains(s),
             })
-            .map(|delim| delim.to_str())
+            .map(Delimiter::to_str)
             .collect::<Vec<_>>();
 
-        let args = if delims.is_empty() && !message.is_empty() {
-            let kind = if message.starts_with('"') && message.ends_with('"') {
-                TokenKind::QuotedArgument
-            } else {
-                TokenKind::Argument
-            };
+        let args = if delims.is_empty() {
+            let msg = message.trim();
+            let kind = if is_quoted(msg) { TokenKind::QuotedArgument } else { TokenKind::Argument };
 
-            // If there are no delimiters, then the only possible argument is the whole message.
-            vec![Token::new(kind, 0, message.len())]
+            if msg.is_empty() {
+                Vec::new()
+            } else {
+                // If there are no delimiters, then the only possible argument is the whole
+                // message.
+                vec![Token::new(kind, 0, message.len())]
+            }
         } else {
             let mut args = Vec::new();
             let mut stream = Stream::new(message);
@@ -434,6 +495,7 @@ impl Args {
     /// assert_eq!(args.current(), None);
     /// ```
     #[inline]
+    #[must_use]
     pub fn current(&self) -> Option<&str> {
         if self.is_empty() {
             return None;
@@ -666,6 +728,7 @@ impl Args {
     /// assert_eq!(protagonists, "Harry, Hermione, Ronald");
     /// ```
     #[inline]
+    #[must_use]
     pub fn raw(&self) -> RawArguments<'_> {
         RawArguments {
             tokens: &self.args,
@@ -688,6 +751,7 @@ impl Args {
     /// assert_eq!(&*horror_movies, &["Saw", "The Mist", "A Quiet Place"]);
     /// ```
     #[inline]
+    #[must_use]
     pub fn raw_quoted(&self) -> RawArguments<'_> {
         let mut raw = self.raw();
         raw.quoted = true;
@@ -718,8 +782,6 @@ impl Args {
     /// # Errors
     ///
     /// Returns [`Error::Eos`] if no argument can be parsed.
-    ///
-    /// [`Error::Eos`]: Error::Eos
     pub fn find<T: FromStr>(&mut self) -> Result<T, T::Err> {
         if self.is_empty() {
             return Err(Error::Eos);
@@ -728,12 +790,11 @@ impl Args {
         let before = self.offset;
         self.restore();
 
-        let pos = match self.iter::<T>().quoted().position(|res| res.is_ok()) {
-            Some(p) => p,
-            None => {
-                self.offset = before;
-                return Err(Error::Eos);
-            },
+        let pos = if let Some(p) = self.iter::<T>().quoted().position(|res| res.is_ok()) {
+            p
+        } else {
+            self.offset = before;
+            return Err(Error::Eos);
         };
 
         self.offset = pos;
@@ -766,8 +827,6 @@ impl Args {
     /// # Errors
     ///
     /// Returns [`Error::Eos`] if no argument can be parsed.
-    ///
-    /// [`Error::Eos`]: Error::Eos
     pub fn find_n<T: FromStr>(&mut self) -> Result<T, T::Err> {
         if self.is_empty() {
             return Err(Error::Eos);
@@ -776,12 +835,11 @@ impl Args {
         let before = self.offset;
         self.restore();
 
-        let pos = match self.iter::<T>().quoted().position(|res| res.is_ok()) {
-            Some(p) => p,
-            None => {
-                self.offset = before;
-                return Err(Error::Eos);
-            },
+        let pos = if let Some(p) = self.iter::<T>().quoted().position(|res| res.is_ok()) {
+            p
+        } else {
+            self.offset = before;
+            return Err(Error::Eos);
         };
 
         self.offset = pos;
@@ -794,12 +852,14 @@ impl Args {
 
     /// Get the original, unmodified message passed to the command.
     #[inline]
+    #[must_use]
     pub fn message(&self) -> &str {
         &self.message
     }
 
     /// Starting from the offset, return the remainder of available arguments.
     #[inline]
+    #[must_use]
     pub fn rest(&self) -> &str {
         self.remains().unwrap_or_default()
     }
@@ -808,6 +868,7 @@ impl Args {
     ///
     /// Returns [`None`] if there are no remaining arguments.
     #[inline]
+    #[must_use]
     pub fn remains(&self) -> Option<&str> {
         if self.is_empty() {
             return None;
@@ -824,20 +885,23 @@ impl Args {
     /// # Note
     ///
     /// The value returned is to be assumed to stay static.
-    /// However, if [`Self::find`] was called previously, and was successful, then the value is substracted by one.
+    /// However, if [`Self::find`] was called previously, and was successful, then the value is subtracted by one.
     #[inline]
+    #[must_use]
     pub fn len(&self) -> usize {
         self.args.len()
     }
 
     /// Assert that there are no more arguments left.
     #[inline]
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.offset >= self.len()
     }
 
     /// Return the amount of arguments still available.
     #[inline]
+    #[must_use]
     pub fn remaining(&self) -> usize {
         if self.is_empty() {
             return 0;
@@ -880,7 +944,7 @@ impl<'a, T: FromStr> Iter<'a, T> {
         self
     }
 
-    /// Trim leading and trailling whitespace off all arguments.
+    /// Trim leading and trailing whitespace off all arguments.
     #[inline]
     pub fn trimmed(&mut self) -> &mut Self {
         match self.state {

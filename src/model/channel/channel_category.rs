@@ -2,11 +2,13 @@
 use crate::builder::EditChannel;
 #[cfg(feature = "model")]
 use crate::http::{CacheHttp, Http};
+#[cfg(feature = "model")]
+use crate::json;
 use crate::model::prelude::*;
-#[cfg(all(feature = "model", feature = "utils"))]
-use crate::utils as serenity_utils;
 
 /// A category of [`GuildChannel`]s.
+///
+/// [Discord docs](https://discord.com/developers/docs/resources/channel#channel-object).
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct ChannelCategory {
@@ -15,8 +17,7 @@ pub struct ChannelCategory {
     /// Guild Id this category belongs to.
     pub guild_id: GuildId,
     /// If this category belongs to another category.
-    #[serde(rename = "parent_id")]
-    pub category_id: Option<ChannelId>,
+    pub parent_id: Option<ChannelId>,
     /// The position of this category.
     pub position: i64,
     /// Indicator of the type of channel this is.
@@ -106,7 +107,7 @@ impl ChannelCategory {
     /// # async fn run() {
     /// #     use serenity::http::Http;
     /// #     use serenity::model::id::ChannelId;
-    /// #     let http = Http::default();
+    /// #     let http = Http::new("token");
     /// #     let category = ChannelId(1234);
     /// category.edit(&http, |c| c.name("test").bitrate(86400)).await;
     /// # }
@@ -119,24 +120,19 @@ impl ChannelCategory {
     ///
     /// [Manage Channels]: Permissions::MANAGE_CHANNELS
     /// [Manage Roles]: Permissions::MANAGE_ROLES
-    #[cfg(feature = "utils")]
     pub async fn edit<F>(&mut self, cache_http: impl CacheHttp, f: F) -> Result<()>
     where
         F: FnOnce(&mut EditChannel) -> &mut EditChannel,
     {
-        let mut map = HashMap::new();
-        map.insert("name", Value::String(self.name.clone()));
-        map.insert("position", Value::Number(Number::from(self.position)));
-
         let mut edit_channel = EditChannel::default();
         f(&mut edit_channel);
-        let map = serenity_utils::hashmap_to_json_map(edit_channel.0);
+        let map = json::hashmap_to_json_map(edit_channel.0);
 
-        cache_http.http().edit_channel(self.id.0, &map).await.map(|channel| {
+        cache_http.http().edit_channel(self.id.0, &map, None).await.map(|channel| {
             let GuildChannel {
                 id,
                 guild_id,
-                category_id,
+                parent_id,
                 position,
                 kind,
                 name,
@@ -148,7 +144,7 @@ impl ChannelCategory {
             *self = ChannelCategory {
                 id,
                 guild_id,
-                category_id,
+                parent_id,
                 position,
                 kind,
                 name,
@@ -159,11 +155,13 @@ impl ChannelCategory {
     }
 
     #[inline]
+    #[must_use]
     pub fn is_nsfw(&self) -> bool {
         self.kind == ChannelType::Text && self.nsfw
     }
 
     /// Returns the name of the category.
+    #[must_use]
     pub fn name(&self) -> &str {
         &self.name
     }

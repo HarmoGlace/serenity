@@ -5,11 +5,11 @@ use crate::model::prelude::*;
 pub mod map;
 
 use std::borrow::Cow;
+#[cfg(feature = "cache")]
 use std::collections::HashMap;
 
 use futures::future::{BoxFuture, FutureExt};
 use map::{CommandMap, GroupMap, ParseMap};
-use tracing::{error, warn};
 use uwl::Stream;
 
 // FIXME: Add the `http` parameter to `Guild::user_permissions_in`.
@@ -26,25 +26,23 @@ use uwl::Stream;
 // the author does possess them. To avoid defaulting to permissions of everyone, we fetch
 // the member from HTTP if it is missing in the guild's members list.
 #[cfg(feature = "cache")]
-async fn permissions_in(
+fn permissions_in(
     ctx: &Context,
     guild_id: GuildId,
     channel_id: ChannelId,
     member: &Member,
     roles: &HashMap<RoleId, Role>,
 ) -> Permissions {
-    if ctx.cache.guild_field(guild_id, |guild| member.user.id == guild.owner_id).await == Some(true)
-    {
+    if ctx.cache.guild_field(guild_id, |guild| member.user.id == guild.owner_id) == Some(true) {
         return Permissions::all();
     }
 
-    let everyone = match roles.get(&RoleId(guild_id.0)) {
-        Some(everyone) => everyone,
-        None => {
-            error!("@everyone role is missing in guild {}", guild_id);
+    let everyone = if let Some(everyone) = roles.get(&RoleId(guild_id.0)) {
+        everyone
+    } else {
+        tracing::error!("@everyone role is missing in guild {}", guild_id);
 
-            return Permissions::empty();
-        },
+        return Permissions::empty();
     };
 
     let mut permissions = everyone.permissions;
@@ -53,7 +51,7 @@ async fn permissions_in(
         if let Some(role) = roles.get(&role) {
             permissions |= role.permissions;
         } else {
-            warn!("{} on {} has non-existent role {:?}", member.user.id, guild_id, role);
+            tracing::warn!("{} on {} has non-existent role {:?}", member.user.id, guild_id, role);
         }
     }
 
@@ -61,8 +59,8 @@ async fn permissions_in(
         return Permissions::all();
     }
 
-    if let Some(Some(channel)) =
-        ctx.cache.guild_field(guild_id, |guild| guild.channels.get(&channel_id).cloned()).await
+    if let Some(Some(Channel::Guild(channel))) =
+        ctx.cache.guild_field(guild_id, |guild| guild.channels.get(&channel_id).cloned())
     {
         if channel.kind == ChannelType::Text {
             permissions &= !(Permissions::CONNECT
@@ -102,11 +100,11 @@ async fn permissions_in(
             permissions = (permissions & !overwrite.deny) | overwrite.allow;
         }
     } else {
-        warn!("Guild {} does not contain channel {}", guild_id, channel_id);
+        tracing::warn!("Guild {} does not contain channel {}", guild_id, channel_id);
     }
 
     if channel_id.0 == guild_id.0 {
-        permissions |= Permissions::READ_MESSAGES;
+        permissions |= Permissions::VIEW_CHANNEL;
     }
 
     // No SEND_MESSAGES => no message-sending-related actions
@@ -119,9 +117,9 @@ async fn permissions_in(
             | Permissions::ATTACH_FILES);
     }
 
-    // If the permission does not have the `READ_MESSAGES` permission, then
+    // If the permission does not have the `VIEW_CHANNEL` permission, then
     // throw out actionable permissions.
-    if !permissions.contains(Permissions::READ_MESSAGES) {
+    if !permissions.contains(Permissions::VIEW_CHANNEL) {
         permissions &= !(Permissions::KICK_MEMBERS
             | Permissions::BAN_MEMBERS
             | Permissions::ADMINISTRATOR
@@ -222,7 +220,7 @@ pub async fn prefix<'a>(
     config: &Configuration,
 ) -> Option<Cow<'a, str>> {
     if let Some(id) = mention(stream, config) {
-        stream.take_while_char(|c| c.is_whitespace());
+        stream.take_while_char(char::is_whitespace);
 
         return Some(Cow::Borrowed(id));
     }
@@ -234,7 +232,7 @@ pub async fn prefix<'a>(
     }
 
     if config.with_whitespace.prefixes {
-        stream.take_while_char(|c| c.is_whitespace());
+        stream.take_while_char(char::is_whitespace);
     }
 
     prefix
@@ -265,7 +263,6 @@ async fn check_discrepancy(
             let member = match ctx
                 .cache
                 .guild_field(guild_id, |guild| guild.members.get(&msg.author.id).cloned())
-                .await
             {
                 Some(Some(member)) => member,
                 // Member not found.
@@ -277,8 +274,8 @@ async fn check_discrepancy(
                 None => return Ok(()),
             };
             #[allow(clippy::unwrap_used)] // Allowing unwrap because should always return Some()
-            let roles = ctx.cache.guild_field(guild_id, |guild| guild.roles.clone()).await.unwrap();
-            let perms = permissions_in(ctx, guild_id, msg.channel_id, &member, &roles).await;
+            let roles = ctx.cache.guild_field(guild_id, |guild| guild.roles.clone()).unwrap();
+            let perms = permissions_in(ctx, guild_id, msg.channel_id, &member, &roles);
 
             if !(perms.contains(*options.required_permissions())
                 || options.owner_privilege() && config.owners.contains(&msg.author.id))
@@ -302,7 +299,7 @@ fn try_parse<M: ParseMap>(
     f: impl Fn(&str) -> String,
 ) -> (String, Option<M::Storage>) {
     if by_space {
-        let n = f(stream.peek_until_char(|c| c.is_whitespace()));
+        let n = f(stream.peek_until_char(char::is_whitespace));
 
         let o = map.get(&n);
 
@@ -337,17 +334,25 @@ fn parse_cmd<'a>(
             try_parse(stream, map, config.by_space, |s| to_lowercase(config, s).into_owned());
 
         if config.disabled_commands.contains(&n) {
-            return Err(ParseError::Dispatch(DispatchError::CommandDisabled(n)));
+            return Err(ParseError::Dispatch {
+                error: DispatchError::CommandDisabled,
+                command_name: n,
+            });
         }
 
         if let Some((cmd, map)) = r {
             stream.increment(n.len());
 
             if config.with_whitespace.commands {
-                stream.take_while_char(|c| c.is_whitespace());
+                stream.take_while_char(char::is_whitespace);
             }
 
-            check_discrepancy(ctx, msg, config, &cmd.options).await?;
+            check_discrepancy(ctx, msg, config, &cmd.options).await.map_err(|e| {
+                ParseError::Dispatch {
+                    error: e,
+                    command_name: n,
+                }
+            })?;
 
             if map.is_empty() {
                 return Ok(cmd);
@@ -378,10 +383,15 @@ fn parse_group<'a>(
             stream.increment(n.len());
 
             if config.with_whitespace.groups {
-                stream.take_while_char(|c| c.is_whitespace());
+                stream.take_while_char(char::is_whitespace);
             }
 
-            check_discrepancy(ctx, msg, config, &group.options).await?;
+            check_discrepancy(ctx, msg, config, &group.options).await.map_err(|e| {
+                ParseError::Dispatch {
+                    error: e,
+                    command_name: n,
+                }
+            })?;
 
             if map.is_empty() {
                 return Ok((group, commands));
@@ -413,10 +423,19 @@ async fn handle_command<'a>(
             command,
         }),
         Err(err) => match group.options.default_command {
-            Some(command) => Ok(Invoke::Command {
-                group,
-                command,
-            }),
+            Some(command) => {
+                check_discrepancy(ctx, msg, config, &command.options).await.map_err(|e| {
+                    ParseError::Dispatch {
+                        error: e,
+                        command_name: command.options.names[0].to_string(),
+                    }
+                })?;
+
+                Ok(Invoke::Command {
+                    group,
+                    command,
+                })
+            },
             None => Err(err),
         },
     }
@@ -439,14 +458,7 @@ async fn handle_group<'a>(
 #[derive(Debug)]
 pub enum ParseError {
     UnrecognisedCommand(Option<String>),
-    Dispatch(DispatchError),
-}
-
-impl From<DispatchError> for ParseError {
-    #[inline]
-    fn from(err: DispatchError) -> Self {
-        ParseError::Dispatch(err)
-    }
+    Dispatch { error: DispatchError, command_name: String },
 }
 
 fn is_unrecognised<T>(res: &Result<T, ParseError>) -> bool {
@@ -457,7 +469,7 @@ fn is_unrecognised<T>(res: &Result<T, ParseError>) -> bool {
 ///
 /// The "command" may be:
 /// 1. A *help command* that provides a friendly browsing interface of all groups and commands,
-/// explaining what each of them are, how they are layed out and how to invoke them.
+/// explaining what each of them are, how they are laid out and how to invoke them.
 /// There can only one help command registered, but might have many names defined for invocation of itself.
 ///
 /// 2. A command defined under another command or a group, which may also belong to another group and so on.
@@ -478,14 +490,14 @@ pub async fn command(
             if name == &n {
                 stream.increment(n.len());
 
-                stream.take_while_char(|c| c.is_whitespace());
+                stream.take_while_char(char::is_whitespace);
 
                 return Ok(Invoke::Help(name));
             }
         }
     }
 
-    let mut last = Err(ParseError::UnrecognisedCommand(None));
+    let mut last = Err::<Invoke, _>(ParseError::UnrecognisedCommand(None));
     let mut is_prefixless = false;
 
     for (group, map) in groups {
@@ -502,20 +514,44 @@ pub async fn command(
                     last = res;
                 }
             },
+            #[allow(clippy::items_after_statements)]
             Map::Prefixless(subgroups, commands) => {
                 is_prefixless = true;
 
+                fn command_name_if_recognised(res: &Result<Invoke, ParseError>) -> Option<&str> {
+                    match res {
+                        Ok(Invoke::Command {
+                            command, ..
+                        }) => Some(command.options.names[0]),
+                        Ok(Invoke::Help(name)) => Some(name), /* unreachable, but fallback just in case */
+                        Err(ParseError::UnrecognisedCommand(_)) => None,
+                        Err(ParseError::Dispatch {
+                            command_name, ..
+                        }) => Some(command_name),
+                    }
+                }
+
                 let res = handle_group(stream, ctx, msg, config, subgroups).await;
 
-                if !is_unrecognised(&res) {
-                    check_discrepancy(ctx, msg, config, &group.options).await?;
+                if let Some(command_name) = command_name_if_recognised(&res) {
+                    check_discrepancy(ctx, msg, config, &group.options).await.map_err(|e| {
+                        ParseError::Dispatch {
+                            error: e,
+                            command_name: command_name.to_owned(),
+                        }
+                    })?;
                     return res;
                 }
 
                 let res = handle_command(stream, ctx, msg, config, commands, group).await;
 
-                if !is_unrecognised(&res) {
-                    check_discrepancy(ctx, msg, config, &group.options).await?;
+                if let Some(command_name) = command_name_if_recognised(&res) {
+                    check_discrepancy(ctx, msg, config, &group.options).await.map_err(|e| {
+                        ParseError::Dispatch {
+                            error: e,
+                            command_name: command_name.to_owned(),
+                        }
+                    })?;
                     return res;
                 }
 

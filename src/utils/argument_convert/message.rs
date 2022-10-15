@@ -1,5 +1,8 @@
+use std::fmt;
+
 use super::ArgumentConvert;
-use crate::{model::prelude::*, prelude::*};
+use crate::model::prelude::*;
+use crate::prelude::*;
 
 /// Error that can be returned from [`Message::convert`].
 #[non_exhaustive]
@@ -16,23 +19,21 @@ pub enum MessageParseError {
 impl std::error::Error for MessageParseError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::Malformed => None,
             Self::Http(e) => Some(e),
-            Self::HttpNotAvailable => None,
+            Self::HttpNotAvailable | Self::Malformed => None,
         }
     }
 }
 
-impl std::fmt::Display for MessageParseError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for MessageParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Malformed => {
-                write!(f, "Provided string did not adhere to any known guild message format")
+                f.write_str("Provided string did not adhere to any known guild message format")
             },
-            Self::Http(_) => write!(f, "Failed to request message data via HTTP"),
-            Self::HttpNotAvailable => write!(
-                f,
-                "Gateway feature is disabled and the required information was not in cache"
+            Self::Http(_) => f.write_str("Failed to request message data via HTTP"),
+            Self::HttpNotAvailable => f.write_str(
+                "Gateway feature is disabled and the required information was not in cache",
             ),
         }
     }
@@ -67,7 +68,7 @@ impl ArgumentConvert for Message {
             .ok_or(MessageParseError::Malformed)?;
 
         #[cfg(feature = "cache")]
-        if let Some(msg) = ctx.cache.message(channel_id, message_id).await {
+        if let Some(msg) = ctx.cache.message(channel_id, message_id) {
             return Ok(msg);
         }
 

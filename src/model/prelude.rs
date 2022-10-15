@@ -9,22 +9,27 @@
 //! ```rust,no_run
 //! use serenity::model::prelude::*;
 //! ```
-
-pub use super::application::*;
-pub use super::channel::*;
-pub use super::connection::*;
-pub use super::event::*;
-pub use super::gateway::*;
-pub use super::guild::*;
-pub use super::id::*;
-#[cfg(feature = "unstable_discord_api")]
-#[cfg_attr(docsrs, doc(cfg(feature = "unstable_discord_api")))]
-pub use super::interactions::*;
-pub use super::invite::*;
-pub use super::misc::*;
-pub use super::oauth2::*;
-pub use super::permissions::*;
-pub use super::user::*;
-pub use super::voice::*;
-pub use super::webhook::*;
-pub use super::*;
+#[doc(inline)]
+pub use super::{
+    application::interaction::MessageFlags as InteractionApplicationCommandCallbackDataFlags,
+    application::interaction::*,
+    application::oauth::*,
+    application::*,
+    channel::MessageFlags,
+    channel::*,
+    connection::*,
+    event::*,
+    gateway::*,
+    guild::audit_log::*,
+    guild::*,
+    id::*,
+    invite::*,
+    mention::*,
+    misc::*,
+    permissions::*,
+    sticker::*,
+    user::*,
+    voice::*,
+    webhook::*,
+    *,
+};

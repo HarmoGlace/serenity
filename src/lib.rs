@@ -36,7 +36,7 @@
 //!
 //! ```toml
 //! [dependencies]
-//! serenity = "0.10"
+//! serenity = "0.11"
 //! ```
 //!
 //! [`Context`]: crate::client::Context
@@ -51,36 +51,44 @@
 //! [examples]: https://github.com/serenity-rs/serenity/tree/current/examples
 //! [gateway docs]: crate::gateway
 #![doc(html_root_url = "https://docs.rs/serenity/*")]
-#![cfg_attr(docsrs, feature(doc_cfg))]
-#![deny(rust_2018_idioms)]
-#![deny(broken_intra_doc_links)]
-#![deny(
+#![cfg_attr(docsrs, feature(doc_auto_cfg))]
+#![warn(
+    unused,
+    rust_2018_idioms,
     clippy::unwrap_used,
     clippy::non_ascii_literal,
-    clippy::missing_errors_doc,
-    clippy::let_underscore_must_use
+    clippy::let_underscore_must_use,
+    clippy::pedantic
 )]
+#![allow(
+    // Allowed to avoid breaking changes.
+    clippy::module_name_repetitions,
+    clippy::needless_pass_by_value,
+    clippy::struct_excessive_bools,
+    clippy::ref_option_ref,
+    // Allowed as they are too pedantic 
+    clippy::cast_possible_truncation,
+    clippy::unreadable_literal,
+    clippy::cast_possible_wrap,
+    clippy::wildcard_imports,
+    clippy::cast_sign_loss,
+    clippy::too_many_lines,
+    clippy::doc_markdown,
+    clippy::cast_lossless,
+    // Covered by other lints
+    clippy::missing_panics_doc, // clippy::unwrap_used
+)]
+#![cfg_attr(test, allow(clippy::unwrap_used))]
 #![type_length_limit = "3294819"] // needed so ShardRunner::run compiles with instrument.
 
 #[macro_use]
 extern crate serde;
 
-#[cfg(all(feature = "tokio_compat", not(feature = "tokio")))]
-extern crate tokio_compat as tokio;
-
-#[cfg(all(feature = "reqwest_compat", not(feature = "reqwest")))]
-extern crate reqwest_compat as reqwest;
-
-#[cfg(all(feature = "async-tungstenite_compat", not(feature = "async-tungstenite")))]
-extern crate async_tungstenite_compat as async_tungstenite;
-
-#[cfg(all(feature = "bytes_compat", not(feature = "bytes")))]
-extern crate bytes_compat as bytes;
-
 #[macro_use]
 mod internal;
 
 pub mod constants;
+pub mod json;
 pub mod model;
 pub mod prelude;
 
@@ -91,7 +99,6 @@ pub mod cache;
 #[cfg(feature = "client")]
 pub mod client;
 #[cfg(feature = "collector")]
-#[cfg_attr(docsrs, doc(cfg(feature = "collector")))]
 pub mod collector;
 #[cfg(feature = "framework")]
 pub mod framework;
@@ -106,8 +113,6 @@ mod error;
 
 #[cfg(feature = "client")]
 use std::sync::Arc;
-#[cfg(all(feature = "client", feature = "cache"))]
-use std::time::Duration;
 
 #[cfg(all(feature = "client", feature = "cache"))]
 use crate::cache::Cache;
@@ -118,14 +123,25 @@ pub use crate::error::{Error, Result};
 use crate::http::Http;
 
 #[cfg(feature = "client")]
-#[derive(Clone, Default)]
 #[non_exhaustive]
 pub struct CacheAndHttp {
     #[cfg(feature = "cache")]
     pub cache: Arc<Cache>,
-    #[cfg(feature = "cache")]
-    pub update_cache_timeout: Option<Duration>,
     pub http: Arc<Http>,
+}
+
+#[cfg(all(feature = "client", feature = "cache"))]
+impl AsRef<Cache> for CacheAndHttp {
+    fn as_ref(&self) -> &Cache {
+        &self.cache
+    }
+}
+
+#[cfg(feature = "client")]
+impl AsRef<Http> for CacheAndHttp {
+    fn as_ref(&self) -> &Http {
+        &self.http
+    }
 }
 
 // For the procedural macros in `command_attr`.

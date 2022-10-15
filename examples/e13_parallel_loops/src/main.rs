@@ -1,22 +1,14 @@
-use std::{
-    env,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    },
-    time::Duration,
-};
+use std::env;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::time::Duration;
 
 use chrono::offset::Utc;
-use serenity::{
-    async_trait,
-    model::{
-        channel::Message,
-        gateway::{Activity, Ready},
-        id::{ChannelId, GuildId},
-    },
-    prelude::*,
-};
+use serenity::async_trait;
+use serenity::model::channel::Message;
+use serenity::model::gateway::{Activity, Ready};
+use serenity::model::id::{ChannelId, GuildId};
+use serenity::prelude::*;
 
 struct Handler {
     is_loop_running: AtomicBool,
@@ -86,25 +78,24 @@ async fn log_system_load(ctx: Arc<Context>) {
 
     // We can use ChannelId directly to send a message to a specific channel; in this case, the
     // message would be sent to the #testing channel on the discord server.
-    if let Err(why) = ChannelId(381926291785383946)
+    let message = ChannelId(381926291785383946)
         .send_message(&ctx, |m| {
             m.embed(|e| {
-                e.title("System Resource Load");
-                e.field("CPU Load Average", format!("{:.2}%", cpu_load.one * 10.0), false);
-                e.field(
-                    "Memory Usage",
-                    format!(
-                        "{:.2} MB Free out of {:.2} MB",
-                        mem_use.free as f32 / 1000.0,
-                        mem_use.total as f32 / 1000.0
-                    ),
-                    false,
-                );
-                e
+                e.title("System Resource Load")
+                    .field("CPU Load Average", format!("{:.2}%", cpu_load.one * 10.0), false)
+                    .field(
+                        "Memory Usage",
+                        format!(
+                            "{:.2} MB Free out of {:.2} MB",
+                            mem_use.free as f32 / 1000.0,
+                            mem_use.total as f32 / 1000.0
+                        ),
+                        false,
+                    )
             })
         })
-        .await
-    {
+        .await;
+    if let Err(why) = message {
         eprintln!("Error sending message: {:?}", why);
     };
 }
@@ -120,7 +111,11 @@ async fn set_status_to_current_time(ctx: Arc<Context>) {
 async fn main() {
     let token = env::var("DISCORD_TOKEN").expect("Expected a token in the environment");
 
-    let mut client = Client::builder(&token)
+    let intents = GatewayIntents::GUILD_MESSAGES
+        | GatewayIntents::DIRECT_MESSAGES
+        | GatewayIntents::GUILDS
+        | GatewayIntents::MESSAGE_CONTENT;
+    let mut client = Client::builder(&token, intents)
         .event_handler(Handler {
             is_loop_running: AtomicBool::new(false),
         })

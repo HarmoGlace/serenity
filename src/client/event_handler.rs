@@ -1,17 +1,49 @@
 use std::collections::HashMap;
 
 use async_trait::async_trait;
-use serde_json::Value;
 
 use super::context::Context;
 use crate::client::bridge::gateway::event::*;
-#[cfg(feature = "unstable_discord_api")]
-use crate::model::interactions::{application_command::ApplicationCommand, Interaction};
+use crate::http::ratelimiting::RatelimitInfo;
+use crate::json::Value;
+use crate::model::application::command::CommandPermission;
+use crate::model::application::interaction::Interaction;
+use crate::model::guild::automod::{ActionExecution, Rule};
 use crate::model::prelude::*;
 
 /// The core trait for handling events by serenity.
 #[async_trait]
 pub trait EventHandler: Send + Sync {
+    /// Dispatched when the permissions of an application command was updated.
+    ///
+    /// Provides said permission's data.
+    async fn application_command_permissions_update(
+        &self,
+        _ctx: Context,
+        _permission: CommandPermission,
+    ) {
+    }
+
+    /// Dispatched when an auto moderation rule was created.
+    ///
+    /// Provides said rule's data.
+    async fn auto_moderation_rule_create(&self, _ctx: Context, _rule: Rule) {}
+
+    /// Dispatched when an auto moderation rule was updated.
+    ///
+    /// Provides said rule's data.
+    async fn auto_moderation_rule_update(&self, _ctx: Context, _rule: Rule) {}
+
+    /// Dispatched when an auto moderation rule was deleted.
+    ///
+    /// Provides said rule's data.
+    async fn auto_moderation_rule_delete(&self, _ctx: Context, _rule: Rule) {}
+
+    /// Dispatched when an auto moderation rule was triggered and an action was executed.
+    ///
+    /// Provides said action execution's data.
+    async fn auto_moderation_action_execution(&self, _ctx: Context, _execution: ActionExecution) {}
+
     /// Dispatched when the cache has received and inserted all data from
     /// guilds.
     ///
@@ -93,12 +125,12 @@ pub trait EventHandler: Send + Sync {
     /// If the flag is false, the bot was removed from the guild, either by being
     /// kicked or banned. If the flag is true, the guild went offline.
     ///
-    /// [`unavailable`]: GuildUnavailable::unavailable
+    /// [`unavailable`]: UnavailableGuild::unavailable
     #[cfg(feature = "cache")]
     async fn guild_delete(
         &self,
         _ctx: Context,
-        _incomplete: GuildUnavailable,
+        _incomplete: UnavailableGuild,
         _full: Option<Guild>,
     ) {
     }
@@ -111,9 +143,9 @@ pub trait EventHandler: Send + Sync {
     /// If the flag is false, the bot was removed from the guild, either by being
     /// kicked or banned. If the flag is true, the guild went offline.
     ///
-    /// [`unavailable`]: GuildUnavailable::unavailable
+    /// [`unavailable`]: UnavailableGuild::unavailable
     #[cfg(not(feature = "cache"))]
-    async fn guild_delete(&self, _ctx: Context, _incomplete: GuildUnavailable) {}
+    async fn guild_delete(&self, _ctx: Context, _incomplete: UnavailableGuild) {}
 
     // the emojis were updated.
 
@@ -139,7 +171,7 @@ pub trait EventHandler: Send + Sync {
     ///
     /// Note: This event will not trigger unless the "guild members" privileged intent
     /// is enabled on the bot application page.
-    async fn guild_member_addition(&self, _ctx: Context, _guild_id: GuildId, _new_member: Member) {}
+    async fn guild_member_addition(&self, _ctx: Context, _new_member: Member) {}
 
     /// Dispatched when a user's membership ends by leaving, getting kicked, or being banned.
     ///
@@ -198,7 +230,7 @@ pub trait EventHandler: Send + Sync {
     /// Dispatched when a role is created.
     ///
     /// Provides the guild's id and the new role's data.
-    async fn guild_role_create(&self, _ctx: Context, _guild_id: GuildId, _new: Role) {}
+    async fn guild_role_create(&self, _ctx: Context, _new: Role) {}
 
     /// Dispatched when a role is deleted.
     ///
@@ -227,7 +259,6 @@ pub trait EventHandler: Send + Sync {
     async fn guild_role_update(
         &self,
         _ctx: Context,
-        _guild_id: GuildId,
         _old_data_if_available: Option<Role>,
         _new: Role,
     ) {
@@ -237,7 +268,18 @@ pub trait EventHandler: Send + Sync {
     ///
     /// Provides the guild's id and the role's new data.
     #[cfg(not(feature = "cache"))]
-    async fn guild_role_update(&self, _ctx: Context, _guild_id: GuildId, _new_data: Role) {}
+    async fn guild_role_update(&self, _ctx: Context, _new_data: Role) {}
+
+    /// Dispatched when the stickers are updated.
+    ///
+    /// Provides the guild's id and the new state of the stickers in the guild.
+    async fn guild_stickers_update(
+        &self,
+        _ctx: Context,
+        _guild_id: GuildId,
+        _current_state: HashMap<StickerId, Sticker>,
+    ) {
+    }
 
     /// Dispatched when a guild became unavailable.
     ///
@@ -352,7 +394,7 @@ pub trait EventHandler: Send + Sync {
     ///
     /// Note: This event will not trigger unless the "guild presences" privileged intent
     /// is enabled on the bot application page.
-    async fn presence_update(&self, _ctx: Context, _new_data: PresenceUpdateEvent) {}
+    async fn presence_update(&self, _ctx: Context, _new_data: Presence) {}
 
     /// Dispatched upon startup.
     ///
@@ -394,24 +436,16 @@ pub trait EventHandler: Send + Sync {
 
     /// Dispatched when a user joins, leaves or moves to a voice channel.
     ///
-    /// Provides the guild's id (if available) and
-    /// the old and the new state of the guild's voice channels.
+    /// Provides the old state (if [`GatewayIntents::GUILDS`] is enabled) and the new state of the
+    /// guild's voice channels.
     #[cfg(feature = "cache")]
-    async fn voice_state_update(
-        &self,
-        _ctx: Context,
-        _: Option<GuildId>,
-        _old: Option<VoiceState>,
-        _new: VoiceState,
-    ) {
-    }
+    async fn voice_state_update(&self, _ctx: Context, _old: Option<VoiceState>, _new: VoiceState) {}
 
     /// Dispatched when a user joins, leaves or moves to a voice channel.
     ///
-    /// Provides the guild's id (if available) and
-    /// the new state of the guild's voice channels.
+    /// Provides the the new state of the guild's voice channels.
     #[cfg(not(feature = "cache"))]
-    async fn voice_state_update(&self, _ctx: Context, _: Option<GuildId>, _: VoiceState) {}
+    async fn voice_state_update(&self, _ctx: Context, _: VoiceState) {}
 
     /// Dispatched when a guild's webhook is updated.
     ///
@@ -427,71 +461,27 @@ pub trait EventHandler: Send + Sync {
     /// Dispatched when an interaction is created (e.g a slash command was used or a button was clicked).
     ///
     /// Provides the created interaction.
-    #[cfg(feature = "unstable_discord_api")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "unstable_discord_api")))]
     async fn interaction_create(&self, _ctx: Context, _interaction: Interaction) {}
 
     /// Dispatched when a guild integration is created.
     ///
     /// Provides the created integration.
-    #[cfg(feature = "unstable_discord_api")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "unstable_discord_api")))]
     async fn integration_create(&self, _ctx: Context, _integration: Integration) {}
 
     /// Dispatched when a guild integration is updated.
     ///
     /// Provides the updated integration.
-    #[cfg(feature = "unstable_discord_api")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "unstable_discord_api")))]
     async fn integration_update(&self, _ctx: Context, _integration: Integration) {}
 
     /// Dispatched when a guild integration is deleted.
     ///
     /// Provides the integration's id, the id of the guild it belongs to, and its associated application id
-    #[cfg(feature = "unstable_discord_api")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "unstable_discord_api")))]
     async fn integration_delete(
         &self,
         _ctx: Context,
         _integration_id: IntegrationId,
         _guild_id: GuildId,
         _application_id: Option<ApplicationId>,
-    ) {
-    }
-
-    /// Dispatched when an application command is created.
-    ///
-    /// Provides the created application command.
-    #[cfg(feature = "unstable_discord_api")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "unstable_discord_api")))]
-    async fn application_command_create(
-        &self,
-        _ctx: Context,
-        _application_command: ApplicationCommand,
-    ) {
-    }
-
-    /// Dispatched when an application command is updated.
-    ///
-    /// Provides the updated application command.
-    #[cfg(feature = "unstable_discord_api")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "unstable_discord_api")))]
-    async fn application_command_update(
-        &self,
-        _ctx: Context,
-        _application_command: ApplicationCommand,
-    ) {
-    }
-
-    /// Dispatched when an application command is deleted.
-    ///
-    /// Provides the deleted application command.
-    #[cfg(feature = "unstable_discord_api")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "unstable_discord_api")))]
-    async fn application_command_delete(
-        &self,
-        _ctx: Context,
-        _application_command: ApplicationCommand,
     ) {
     }
 
@@ -543,13 +533,51 @@ pub trait EventHandler: Send + Sync {
     /// Provides the added/removed members, the approximate member count of members in the thread,
     /// the thread Id and its guild Id.
     ///
-    /// [`GatewayIntents::GUILDS`]: crate::client::bridge::gateway::GatewayIntents::GUILDS
+    /// [`GatewayIntents::GUILDS`]: crate::model::gateway::GatewayIntents::GUILDS
     async fn thread_members_update(
         &self,
         _ctx: Context,
         _thread_members_update: ThreadMembersUpdateEvent,
     ) {
     }
+
+    /// Dispatched when a scheduled event is created.
+    ///
+    /// Provides data about the scheduled event.
+    async fn guild_scheduled_event_create(&self, _ctx: Context, _event: ScheduledEvent) {}
+
+    /// Dispatched when a scheduled event is updated.
+    ///
+    /// Provides data about the scheduled event.
+    async fn guild_scheduled_event_update(&self, _ctx: Context, _event: ScheduledEvent) {}
+
+    /// Dispatched when a scheduled event is deleted.
+    ///
+    /// Provides data about the scheduled event.
+    async fn guild_scheduled_event_delete(&self, _ctx: Context, _event: ScheduledEvent) {}
+
+    /// Dispatched when a guild member has subscribed to a scheduled event.
+    ///
+    /// Provides data about the subscription.
+    async fn guild_scheduled_event_user_add(
+        &self,
+        _ctx: Context,
+        _subscribed: GuildScheduledEventUserAddEvent,
+    ) {
+    }
+
+    /// Dispatched when a guild member has unsubscribed from a scheduled event.
+    ///
+    /// Provides data about the cancelled subscription.
+    async fn guild_scheduled_event_user_remove(
+        &self,
+        _ctx: Context,
+        _unsubscribed: GuildScheduledEventUserRemoveEvent,
+    ) {
+    }
+
+    /// Dispatched when an HTTP rate limit is hit
+    async fn ratelimit(&self, _data: RatelimitInfo) {}
 }
 
 /// This core trait for handling raw events

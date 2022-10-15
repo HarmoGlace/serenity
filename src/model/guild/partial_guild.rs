@@ -1,18 +1,21 @@
-// FIXME: Remove after the removal of the `̀nsfw` field.
-#![allow(deprecated)]
-
 use serde::de::Error as DeError;
 #[cfg(feature = "cache")]
 use tracing::{error, warn};
 
 #[cfg(feature = "model")]
 use crate::builder::{
+    CreateApplicationCommand,
+    CreateApplicationCommandPermissionsData,
+    CreateApplicationCommands,
     CreateChannel,
+    CreateSticker,
+    EditAutoModRule,
     EditGuild,
     EditGuildWelcomeScreen,
     EditGuildWidget,
     EditMember,
     EditRole,
+    EditSticker,
 };
 #[cfg(all(feature = "cache", feature = "utils", feature = "client"))]
 use crate::cache::Cache;
@@ -27,21 +30,19 @@ use crate::collector::{
 };
 #[cfg(feature = "model")]
 use crate::http::{CacheHttp, Http};
+use crate::json::prelude::*;
+use crate::json::{from_number, from_value};
+#[cfg(feature = "model")]
+use crate::model::application::command::{Command, CommandPermission};
+#[cfg(feature = "model")]
+use crate::model::guild::automod::Rule;
 use crate::model::prelude::*;
-use crate::model::utils::{deserialize_emojis, deserialize_roles};
-#[cfg(all(feature = "model", feature = "unstable_discord_api"))]
-use crate::{
-    builder::{
-        CreateApplicationCommand,
-        CreateApplicationCommandPermissionsData,
-        CreateApplicationCommands,
-        CreateApplicationCommandsPermissions,
-    },
-    model::interactions::application_command::{ApplicationCommand, ApplicationCommandPermission},
-};
+use crate::model::utils::{emojis, roles, stickers};
 
 /// Partial information about a [`Guild`]. This does not include information
 /// like member data.
+///
+/// [Discord docs](https://discord.com/developers/docs/resources/guild#guild-object).
 #[derive(Clone, Debug, Serialize)]
 #[non_exhaustive]
 pub struct PartialGuild {
@@ -49,8 +50,7 @@ pub struct PartialGuild {
     pub application_id: Option<ApplicationId>,
     /// The unique Id identifying the guild.
     ///
-    /// This is equivilant to the Id of the default role (`@everyone`) and also
-    /// that of the default channel (typically `#general`).
+    /// This is equivalent to the Id of the default role (`@everyone`).
     pub id: GuildId,
     /// Id of a voice channel that's considered the AFK channel.
     pub afk_channel_id: Option<ChannelId>,
@@ -65,7 +65,7 @@ pub struct PartialGuild {
     /// The channel id that the widget will generate an invite to, or null if set to no invite
     pub widget_channel_id: Option<ChannelId>,
     /// All of the guild's custom emojis.
-    #[serde(serialize_with = "serialize_emojis", deserialize_with = "deserialize_emojis")]
+    #[serde(with = "emojis")]
     pub emojis: HashMap<EmojiId, Emoji>,
     /// Features enabled for the guild.
     ///
@@ -85,11 +85,8 @@ pub struct PartialGuild {
     /// Whether or not the user is the owner of the guild.
     #[serde(default)]
     pub owner: bool,
-    /// The region that the voice servers that the guild uses are located in.
-    #[deprecated(note = "Regions are now set per voice channel instead of globally.")]
-    pub region: String,
     /// A mapping of the guild's roles.
-    #[serde(serialize_with = "serialize_roles", deserialize_with = "deserialize_roles")]
+    #[serde(with = "roles")]
     pub roles: HashMap<RoleId, Role>,
     /// An identifying hash of the guild's splash icon.
     ///
@@ -121,8 +118,6 @@ pub struct PartialGuild {
     #[serde(default)]
     pub premium_tier: PremiumTier,
     /// The total number of users currently boosting this server.
-    // In some cases Discord returns `null` rather than 0.
-    #[serde(deserialize_with = "deserialize_u64_or_zero")]
     pub premium_subscription_count: u64,
     /// The guild's banner, if it has one.
     pub banner: Option<String>,
@@ -136,12 +131,6 @@ pub struct PartialGuild {
     pub approximate_member_count: Option<u64>,
     /// Approximate number of non-offline members in this guild.
     pub approximate_presence_count: Option<u64>,
-    /// Whether or not this guild is designated as NSFW. See [`discord support article`].
-    ///
-    /// [`discord support article`]: https://support.discord.com/hc/en-us/articles/1500005389362-NSFW-Server-Designation
-    #[deprecated(note = "Removed in favor of Guild::nsfw_level.")]
-    #[serde(default)]
-    pub nsfw: bool,
     /// The guild NSFW state. See [`discord support article`].
     ///
     /// [`discord support article`]: https://support.discord.com/hc/en-us/articles/1500005389362-NSFW-Server-Designation
@@ -156,10 +145,119 @@ pub struct PartialGuild {
     pub max_members: Option<u64>,
     /// The user permissions in the guild.
     pub permissions: Option<String>,
+    /// All of the guild's custom stickers.
+    #[serde(with = "stickers")]
+    pub stickers: HashMap<StickerId, Sticker>,
 }
 
 #[cfg(feature = "model")]
 impl PartialGuild {
+    /// Gets all auto moderation [`Rule`]s of this guild via HTTP.
+    ///
+    /// **Note**: Requires the [Manage Guild] permission.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Http`] if the guild is unavailable.
+    ///
+    /// [Manage Guild]: Permissions::MANAGE_GUILD
+    #[inline]
+    pub async fn automod_rules(self, http: impl AsRef<Http>) -> Result<Vec<Rule>> {
+        self.id.automod_rules(http).await
+    }
+
+    /// Gets an auto moderation [`Rule`] of this guild by its ID via HTTP.
+    ///
+    /// **Note**: Requires the [Manage Guild] permission.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Http`] if a rule with the given ID does not exist.
+    ///
+    /// [Manage Guild]: Permissions::MANAGE_GUILD
+    #[inline]
+    pub async fn automod_rule(
+        self,
+        http: impl AsRef<Http>,
+        rule_id: impl Into<RuleId>,
+    ) -> Result<Rule> {
+        self.id.automod_rule(http, rule_id).await
+    }
+
+    /// Creates an auto moderation [`Rule`] in the guild.
+    ///
+    /// **Note**: Requires the [Manage Guild] permission.
+    ///
+    /// # Examples
+    ///
+    /// Create a custom keyword filter to block the message and timeout the author.
+    ///
+    /// ```ignore
+    /// use serenity::model::guild::automod::{Action, Trigger};
+    ///
+    /// let _rule = guild
+    ///     .create_automod_rule(&http, |r| {
+    ///         r.name("foobar filter")
+    ///             .trigger(Trigger::Keyword(vec!["foo*".to_string(), "*bar".to_string()]))
+    ///             .actions(vec![Action::BlockMessage, Action::Timeout(60)])
+    ///     })
+    ///     .await;
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Http`] if the current user lacks permission,
+    /// or if invalid values are set.
+    ///
+    /// [Manage Guild]: Permissions::MANAGE_GUILD
+    #[inline]
+    pub async fn create_automod_rule(
+        self,
+        http: impl AsRef<Http>,
+        f: impl FnOnce(&mut EditAutoModRule) -> &mut EditAutoModRule,
+    ) -> Result<Rule> {
+        self.id.create_automod_rule(http, f).await
+    }
+
+    /// Edit an auto moderation [`Rule`] by its ID.
+    ///
+    /// **Note**: Requires the [Manage Guild] permission.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Http`] if the current user lacks permission,
+    /// or if invalid values are set.
+    ///
+    /// [Manage Guild]: Permissions::MANAGE_GUILD
+    #[inline]
+    pub async fn edit_automod_rule(
+        self,
+        http: impl AsRef<Http>,
+        rule_id: impl Into<RuleId>,
+        f: impl FnOnce(&mut EditAutoModRule) -> &mut EditAutoModRule,
+    ) -> Result<Rule> {
+        self.id.edit_automod_rule(http, rule_id, f).await
+    }
+
+    /// Deletes an auto moderation [`Rule`] from the guild.
+    ///
+    /// **Note**: Requires the [Manage Guild] permission.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Http`] if the current user lacks permission,
+    /// or if a rule with that Id does not exist.
+    ///
+    /// [Manage Guild]: Permissions::MANAGE_GUILD
+    #[inline]
+    pub async fn delete_automod_rule(
+        self,
+        http: impl AsRef<Http>,
+        rule_id: impl Into<RuleId>,
+    ) -> Result<()> {
+        self.id.delete_automod_rule(http, rule_id).await
+    }
+
     /// Ban a [`User`] from the guild, deleting a number of
     /// days' worth of messages (`dmd`) between the range 0 and 7.
     ///
@@ -260,15 +358,17 @@ impl PartialGuild {
     }
 
     #[cfg(feature = "cache")]
-    pub async fn channel_id_from_name(
+    pub fn channel_id_from_name(
         &self,
         cache: impl AsRef<Cache>,
         name: impl AsRef<str>,
     ) -> Option<ChannelId> {
         let name = name.as_ref();
-        let guild_channels = cache.as_ref().guild_channels(&self.id).await?;
+        let guild_channels = cache.as_ref().guild_channels(&self.id)?;
 
-        for (id, channel) in guild_channels.iter() {
+        for channel_entry in guild_channels.iter() {
+            let (id, channel) = channel_entry.pair();
+
             if channel.name == name {
                 return Some(*id);
             }
@@ -314,7 +414,7 @@ impl PartialGuild {
     /// Refer to the documentation for [`Guild::create_emoji`] for more
     /// information.
     ///
-    /// Requires the [Manage Emojis] permission.
+    /// Requires the [Manage Emojis and Stickers] permission.
     ///
     /// # Examples
     ///
@@ -329,7 +429,7 @@ impl PartialGuild {
     ///
     /// [`EditProfile::avatar`]: crate::builder::EditProfile::avatar
     /// [`utils::read_image`]: crate::utils::read_image
-    /// [Manage Emojis]: Permissions::MANAGE_EMOJIS
+    /// [Manage Emojis and Stickers]: Permissions::MANAGE_EMOJIS_AND_STICKERS
     #[inline]
     pub async fn create_emoji(
         &self,
@@ -359,24 +459,20 @@ impl PartialGuild {
         self.id.create_integration(&http, integration_id, kind).await
     }
 
-    /// Creates a guild specific [`ApplicationCommand`]
+    /// Creates a guild specific [`Command`]
     ///
-    /// **Note**: Unlike global `ApplicationCommand`s, guild commands will update instantly.
+    /// **Note**: Unlike global `Command`s, guild commands will update instantly.
     ///
     /// # Errors
     ///
     /// Returns the same possible errors as `create_global_application_command`.
-    ///
-    /// [`ApplicationCommand`]: crate::model::interactions::application_command::ApplicationCommand
-    #[cfg(feature = "unstable_discord_api")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "unstable_discord_api")))]
     #[allow(clippy::missing_errors_doc)]
     #[inline]
     pub async fn create_application_command<F>(
         &self,
         http: impl AsRef<Http>,
         f: F,
-    ) -> Result<ApplicationCommand>
+    ) -> Result<Command>
     where
         F: FnOnce(&mut CreateApplicationCommand) -> &mut CreateApplicationCommand,
     {
@@ -386,32 +482,34 @@ impl PartialGuild {
     /// Overrides all guild application commands.
     ///
     /// [`create_application_command`]: Self::create_application_command
-    #[cfg(feature = "unstable_discord_api")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "unstable_discord_api")))]
+    ///
+    /// # Errors
+    ///
+    /// If there is an error, it will be either [`Error::Http`] or [`Error::Json`].
     pub async fn set_application_commands<F>(
         &self,
         http: impl AsRef<Http>,
         f: F,
-    ) -> Result<Vec<ApplicationCommand>>
+    ) -> Result<Vec<Command>>
     where
         F: FnOnce(&mut CreateApplicationCommands) -> &mut CreateApplicationCommands,
     {
         self.id.set_application_commands(http, f).await
     }
 
-    /// Creates a guild specific [`ApplicationCommandPermission`].
+    /// Creates a guild specific [`CommandPermission`].
     ///
     /// **Note**: It will update instantly.
     ///
-    /// [`ApplicationCommandPermission`]: crate::model::interactions::application_command::ApplicationCommandPermission
-    #[cfg(feature = "unstable_discord_api")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "unstable_discord_api")))]
+    /// # Errors
+    ///
+    /// If there is an error, it will be either [`Error::Http`] or [`Error::Json`].
     pub async fn create_application_command_permission<F>(
         &self,
         http: impl AsRef<Http>,
         command_id: CommandId,
         f: F,
-    ) -> Result<ApplicationCommandPermission>
+    ) -> Result<CommandPermission>
     where
         F: FnOnce(
             &mut CreateApplicationCommandPermissionsData,
@@ -424,51 +522,58 @@ impl PartialGuild {
     /// more than one permission per call.
     ///
     /// [`create_application_command_permission`]: Self::create_application_command_permission
-    #[cfg(feature = "unstable_discord_api")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "unstable_discord_api")))]
+    ///
+    /// # Errors
+    ///
+    /// If there is an error, it will be either [`Error::Http`] or [`Error::Json`].
+    #[deprecated(note = "use `create_appliction_command_permission`.")]
+    #[allow(deprecated)]
     pub async fn set_application_commands_permissions<F>(
         &self,
         http: impl AsRef<Http>,
         f: F,
-    ) -> Result<Vec<ApplicationCommandPermission>>
+    ) -> Result<Vec<CommandPermission>>
     where
         F: FnOnce(
-            &mut CreateApplicationCommandsPermissions,
-        ) -> &mut CreateApplicationCommandsPermissions,
+            &mut crate::builder::CreateApplicationCommandsPermissions,
+        ) -> &mut crate::builder::CreateApplicationCommandsPermissions,
     {
         self.id.set_application_commands_permissions(http, f).await
     }
 
     /// Get all guild application commands.
-    #[cfg(feature = "unstable_discord_api")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "unstable_discord_api")))]
-    pub async fn get_application_commands(
-        &self,
-        http: impl AsRef<Http>,
-    ) -> Result<Vec<ApplicationCommand>> {
+    ///
+    /// # Errors
+    ///
+    /// If there is an error, it will be either [`Error::Http`] or [`Error::Json`].
+    pub async fn get_application_commands(&self, http: impl AsRef<Http>) -> Result<Vec<Command>> {
         self.id.get_application_commands(http).await
     }
 
     /// Get a specific guild application command by its Id.
-    #[cfg(feature = "unstable_discord_api")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "unstable_discord_api")))]
+    ///
+    /// # Errors
+    ///
+    /// If there is an error, it will be either [`Error::Http`] or [`Error::Json`].
     pub async fn get_application_command(
         &self,
         http: impl AsRef<Http>,
         command_id: CommandId,
-    ) -> Result<ApplicationCommand> {
+    ) -> Result<Command> {
         self.id.get_application_command(http, command_id).await
     }
 
     /// Edit guild application command by its Id.
-    #[cfg(feature = "unstable_discord_api")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "unstable_discord_api")))]
+    ///
+    /// # Errors
+    ///
+    /// If there is an error, it will be either [`Error::Http`] or [`Error::Json`].
     pub async fn edit_application_command<F>(
         &self,
         http: impl AsRef<Http>,
         command_id: CommandId,
         f: F,
-    ) -> Result<ApplicationCommand>
+    ) -> Result<Command>
     where
         F: FnOnce(&mut CreateApplicationCommand) -> &mut CreateApplicationCommand,
     {
@@ -476,8 +581,10 @@ impl PartialGuild {
     }
 
     /// Delete guild application command by its Id.
-    #[cfg(feature = "unstable_discord_api")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "unstable_discord_api")))]
+    ///
+    /// # Errors
+    ///
+    /// If there is an error, it will be either [`Error::Http`] or [`Error::Json`].
     pub async fn delete_application_command(
         &self,
         http: impl AsRef<Http>,
@@ -487,23 +594,27 @@ impl PartialGuild {
     }
 
     /// Get all guild application commands permissions only.
-    #[cfg(feature = "unstable_discord_api")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "unstable_discord_api")))]
+    ///
+    /// # Errors
+    ///
+    /// If there is an error, it will be either [`Error::Http`] or [`Error::Json`].
     pub async fn get_application_commands_permissions(
         &self,
         http: impl AsRef<Http>,
-    ) -> Result<Vec<ApplicationCommandPermission>> {
+    ) -> Result<Vec<CommandPermission>> {
         self.id.get_application_commands_permissions(http).await
     }
 
     /// Get permissions for specific guild application command by its Id.
-    #[cfg(feature = "unstable_discord_api")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "unstable_discord_api")))]
+    ///
+    /// # Errors
+    ///
+    /// If there is an error, it will be either [`Error::Http`] or [`Error::Json`].
     pub async fn get_application_command_permissions(
         &self,
         http: impl AsRef<Http>,
         command_id: CommandId,
-    ) -> Result<ApplicationCommandPermission> {
+    ) -> Result<CommandPermission> {
         self.id.get_application_command_permissions(http, command_id).await
     }
 
@@ -527,6 +638,34 @@ impl PartialGuild {
         self.id.create_role(&http, f).await
     }
 
+    /// Creates a new sticker in the guild with the data set, if any.
+    ///
+    /// **Note**: Requires the [Manage Emojis and Stickers] permission.
+    ///
+    /// # Errors
+    ///
+    /// If the `cache` is enabled, returns a [`ModelError::InvalidPermissions`]
+    /// if the current user does not have permission to manage roles.
+    ///
+    /// [Manage Emojis and Stickers]: crate::model::permissions::Permissions::MANAGE_EMOJIS_AND_STICKERS
+    pub async fn create_sticker<'a, F>(&self, cache_http: impl CacheHttp, f: F) -> Result<Sticker>
+    where
+        for<'b> F: FnOnce(&'b mut CreateSticker<'a>) -> &'b mut CreateSticker<'a>,
+    {
+        #[cfg(feature = "cache")]
+        {
+            if cache_http.cache().is_some() {
+                let req = Permissions::MANAGE_EMOJIS_AND_STICKERS;
+
+                if !self.has_perms(&cache_http, req).await {
+                    return Err(Error::Model(ModelError::InvalidPermissions(req)));
+                }
+            }
+        }
+
+        self.id.create_sticker(cache_http.http(), f).await
+    }
+
     /// Deletes the current guild if the current user is the owner of the
     /// guild.
     ///
@@ -543,14 +682,14 @@ impl PartialGuild {
 
     /// Deletes an [`Emoji`] from the guild.
     ///
-    /// Requires the [Manage Emojis] permission.
+    /// Requires the [Manage Emojis and Stickers] permission.
     ///
     /// # Errors
     ///
     /// Returns [`Error::Http`] if the current user lacks permission,
     /// or if an emoji with that Id does not exist in the guild.
     ///
-    /// [Manage Emojis]: Permissions::MANAGE_EMOJIS
+    /// [Manage Emojis and Stickers]: Permissions::MANAGE_EMOJIS_AND_STICKERS
     #[inline]
     pub async fn delete_emoji(
         &self,
@@ -601,6 +740,25 @@ impl PartialGuild {
         self.id.delete_role(&http, role_id).await
     }
 
+    /// Deletes a [`Sticker`] by Id from the guild.
+    ///
+    /// Requires the [Manage Emojis and Stickers] permission.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Http`] if the current user lacks permission
+    /// to delete the sticker.
+    ///
+    /// [Manage Emojis and Stickers]: crate::model::permissions::Permissions::MANAGE_EMOJIS_AND_STICKERS
+    #[inline]
+    pub async fn delete_sticker(
+        &self,
+        http: impl AsRef<Http>,
+        sticker_id: impl Into<StickerId>,
+    ) -> Result<()> {
+        self.id.delete_sticker(&http, sticker_id).await
+    }
+
     /// Edits the current guild with new data where specified.
     ///
     /// **Note**: Requires the current user to have the [Manage Guild]
@@ -627,12 +785,6 @@ impl PartialGuild {
                 self.mfa_level = guild.mfa_level;
                 self.name = guild.name;
                 self.owner_id = guild.owner_id;
-
-                #[allow(deprecated)]
-                {
-                    self.region = guild.region;
-                }
-
                 self.roles = guild.roles;
                 self.splash = guild.splash;
                 self.verification_level = guild.verification_level;
@@ -648,14 +800,14 @@ impl PartialGuild {
     /// Also see [`Emoji::edit`] if you have the `cache` and `methods` features
     /// enabled.
     ///
-    /// Requires the [Manage Emojis] permission.
+    /// Requires the [Manage Emojis and Stickers] permission.
     ///
     /// # Errors
     ///
     /// Returns [`Error::Http`] if the current user lacks permission,
     /// or if an emoji with that Id does not exist in the guild.
     ///
-    /// [Manage Emojis]: Permissions::MANAGE_EMOJIS
+    /// [Manage Emojis and Stickers]: Permissions::MANAGE_EMOJIS_AND_STICKERS
     #[inline]
     pub async fn edit_emoji(
         &self,
@@ -766,7 +918,6 @@ impl PartialGuild {
     /// Returns [`Error::Http`] if the current user lacks permission.
     ///
     /// [Manage Roles]: Permissions::MANAGE_ROLES
-    /// [`Error::Http`]: crate::error::Error::Http
     #[inline]
     pub async fn edit_role_position(
         &self,
@@ -777,14 +928,41 @@ impl PartialGuild {
         self.id.edit_role_position(&http, role_id, position).await
     }
 
+    /// Edits a sticker, optionally setting its fields.
+    ///
+    /// Requires the [Manage Emojis and Stickers] permission.
+    ///
+    /// # Examples
+    ///
+    /// Rename a sticker:
+    ///
+    /// ```rust,ignore
+    /// guild.edit_sticker(&context, StickerId(7), |r| r.name("Bun bun meow"));
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Http`] if the current user lacks permission.
+    ///
+    /// [Manage Emojis and Stickers]: crate::model::permissions::Permissions::MANAGE_EMOJIS_AND_STICKERS
+    #[inline]
+    pub async fn edit_sticker<F>(
+        &self,
+        http: impl AsRef<Http>,
+        sticker_id: impl Into<StickerId>,
+        f: F,
+    ) -> Result<Sticker>
+    where
+        F: FnOnce(&mut EditSticker) -> &mut EditSticker,
+    {
+        self.id.edit_sticker(&http, sticker_id, f).await
+    }
+
     /// Edits the [`GuildWelcomeScreen`].
     ///
     /// # Errors
     ///
     /// Returns an [`Error::Http`] if some mandatory fields are not provided.
-    ///
-    /// [`Error::Http`]: crate::error::Error::Http
-    /// [`GuildWelcomeScreen`]: super::guild::GuildWelcomeScreen
     pub async fn edit_welcome_screen<F>(
         &self,
         http: impl AsRef<Http>,
@@ -802,9 +980,6 @@ impl PartialGuild {
     ///
     /// Returns an [`Error::Http`] if the bot does not have the `MANAGE_GUILD`
     /// permission.
-    ///
-    /// [`Error::Http`]: crate::error::Error::Http
-    /// [`GuildWelcomeScreen`]: super::guild::GuildWelcomeScreen
     pub async fn edit_widget<F>(&self, http: impl AsRef<Http>, f: F) -> Result<GuildWidget>
     where
         F: FnOnce(&mut EditGuildWidget) -> &mut EditGuildWidget,
@@ -848,6 +1023,7 @@ impl PartialGuild {
     }
 
     #[cfg(feature = "cache")]
+    #[allow(clippy::unused_async)]
     async fn _greater_member_hierarchy(
         &self,
         cache: impl AsRef<Cache>,
@@ -868,21 +1044,17 @@ impl PartialGuild {
 
         let lhs = cache
             .as_ref()
-            .guild(self.id)
-            .await?
+            .guild(self.id)?
             .members
             .get(&lhs_id)?
             .highest_role_info(&cache)
-            .await
             .unwrap_or((RoleId(0), 0));
         let rhs = cache
             .as_ref()
-            .guild(self.id)
-            .await?
+            .guild(self.id)?
             .members
             .get(&rhs_id)?
             .highest_role_info(&cache)
-            .await
             .unwrap_or((RoleId(0), 0));
 
         // If LHS and RHS both have no top position or have the same role ID,
@@ -942,13 +1114,12 @@ impl PartialGuild {
             return Ok(Permissions::all());
         }
 
-        let everyone = match self.roles.get(&RoleId(self.id.0)) {
-            Some(everyone) => everyone,
-            None => {
-                error!("@everyone role ({}) missing in '{}'", self.id, self.name,);
+        let everyone = if let Some(everyone) = self.roles.get(&RoleId(self.id.0)) {
+            everyone
+        } else {
+            error!("@everyone role ({}) missing in '{}'", self.id, self.name,);
 
-                return Ok(Permissions::empty());
-            },
+            return Ok(Permissions::empty());
         };
 
         let member = self.member(cache_http, &user_id).await?;
@@ -983,7 +1154,6 @@ impl PartialGuild {
     /// Returns an [`Error::Http`] if the current user is lacking permission.
     ///
     /// [Manage Channels]: Permissions::MANAGE_CHANNELS
-    /// [`Error::Http`]: crate::error::Error::Http
     #[inline]
     pub async fn reorder_channels<It>(&self, http: impl AsRef<Http>, channels: It) -> Result<()>
     where
@@ -1003,8 +1173,6 @@ impl PartialGuild {
     /// # Errors
     ///
     /// Returns an [`Error::Http`] if the API returns an error.
-    ///
-    /// [`Error::Http`]: crate::error::Error::Http
     #[inline]
     pub async fn search_members(
         &self,
@@ -1033,8 +1201,6 @@ impl PartialGuild {
     /// the API response.
     ///
     /// [Kick Members]: Permissions::KICK_MEMBERS
-    /// [`Error::Http`]: crate::error::Error::Http
-    /// [`Error::Json`]: crate::error::Error::Json
     pub async fn start_prune(&self, cache_http: impl CacheHttp, days: u16) -> Result<GuildPrune> {
         #[cfg(feature = "cache")]
         {
@@ -1053,7 +1219,7 @@ impl PartialGuild {
     #[cfg(feature = "cache")]
     async fn has_perms(&self, cache_http: impl CacheHttp, mut permissions: Permissions) -> bool {
         if let Some(cache) = cache_http.cache() {
-            let user_id = cache.current_user().await.id;
+            let user_id = cache.current_user().id;
 
             if let Ok(perms) = self.member_permissions(&cache_http, user_id).await {
                 permissions.remove(perms);
@@ -1082,11 +1248,11 @@ impl PartialGuild {
         self.id.kick(&http, user_id).await
     }
 
-    #[inline]
     /// # Errors
     ///
     /// In addition to the reasons [`Self::kick`] may return an error,
     /// can also return an error if the reason is too long.
+    #[inline]
     pub async fn kick_with_reason(
         &self,
         http: impl AsRef<Http>,
@@ -1097,13 +1263,15 @@ impl PartialGuild {
     }
 
     /// Returns a formatted URL of the guild's icon, if the guild has an icon.
+    #[must_use]
     pub fn icon_url(&self) -> Option<String> {
-        self.icon.as_ref().map(|icon| format!(cdn!("/icons/{}/{}.webp"), self.id, icon))
+        self.icon.as_ref().map(|icon| cdn!("/icons/{}/{}.webp", self.id, icon))
     }
 
     /// Returns a formatted URL of the guild's banner, if the guild has a banner.
+    #[must_use]
     pub fn banner_url(&self) -> Option<String> {
-        self.banner.as_ref().map(|banner| format!(cdn!("/banners/{}/{}.webp"), self.id, banner))
+        self.banner.as_ref().map(|banner| cdn!("/banners/{}/{}.webp", self.id, banner))
     }
 
     /// Gets all [`Emoji`]s of this guild via HTTP.
@@ -1194,7 +1362,7 @@ impl PartialGuild {
     /// may also return [`Error::NotInRange`] if the input is
     /// not within range.
     ///
-    /// [`User`]: ../user/struct.User.html
+    /// [`User`]: crate::model::user::User
     #[inline]
     pub async fn members(
         &self,
@@ -1280,8 +1448,9 @@ impl PartialGuild {
     /// [`utils::shard_id`]: crate::utils::shard_id
     #[cfg(all(feature = "cache", feature = "utils"))]
     #[inline]
-    pub async fn shard_id(&self, cache: impl AsRef<Cache>) -> u64 {
-        self.id.shard_id(cache).await
+    #[must_use]
+    pub fn shard_id(&self, cache: impl AsRef<Cache>) -> u64 {
+        self.id.shard_id(cache)
     }
 
     /// Returns the Id of the shard associated with the guild.
@@ -1306,16 +1475,16 @@ impl PartialGuild {
     /// ```
     #[cfg(all(feature = "utils", not(feature = "cache")))]
     #[inline]
-    pub async fn shard_id(&self, shard_count: u64) -> u64 {
-        self.id.shard_id(shard_count).await
+    #[must_use]
+    pub fn shard_id(&self, shard_count: u64) -> u64 {
+        self.id.shard_id(shard_count)
     }
 
     /// Returns the formatted URL of the guild's splash image, if one exists.
     #[inline]
+    #[must_use]
     pub fn splash_url(&self) -> Option<String> {
-        self.splash
-            .as_ref()
-            .map(|splash| format!(cdn!("/splashes/{}/{}.webp?size=4096"), self.id, splash))
+        self.splash.as_ref().map(|splash| cdn!("/splashes/{}/{}.webp?size=4096", self.id, splash))
     }
 
     /// Starts an integration sync for the given integration Id.
@@ -1403,7 +1572,7 @@ impl PartialGuild {
     /// impl EventHandler for Handler {
     ///     async fn message(&self, context: Context, msg: Message) {
     ///         if let Some(guild_id) = msg.guild_id {
-    ///             if let Some(guild) = guild_id.to_guild_cached(&context).await {
+    ///             if let Some(guild) = guild_id.to_guild_cached(&context) {
     ///                 if let Some(role) = guild.role_by_name("role_name") {
     ///                     println!("Obtained role's reference: {:?}", role);
     ///                 }
@@ -1412,54 +1581,46 @@ impl PartialGuild {
     ///     }
     /// }
     ///
-    /// let mut client =Client::builder("token").event_handler(Handler).await?;
+    /// let mut client =
+    ///     Client::builder("token", GatewayIntents::default()).event_handler(Handler).await?;
     ///
     /// client.start().await?;
     /// #    Ok(())
     /// # }
     /// ```
     #[inline]
+    #[must_use]
     pub fn role_by_name(&self, role_name: &str) -> Option<&Role> {
         self.roles.values().find(|role| role_name == role.name)
     }
 
     /// Returns a future that will await one message sent in this guild.
     #[cfg(feature = "collector")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "collector")))]
-    pub fn await_reply<'a>(
-        &self,
-        shard_messenger: &'a impl AsRef<ShardMessenger>,
-    ) -> CollectReply<'a> {
+    pub fn await_reply(&self, shard_messenger: impl AsRef<ShardMessenger>) -> CollectReply {
         CollectReply::new(shard_messenger).guild_id(self.id.0)
     }
 
     /// Returns a stream builder which can be awaited to obtain a stream of messages in this guild.
     #[cfg(feature = "collector")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "collector")))]
-    pub fn await_replies<'a>(
+    pub fn await_replies(
         &self,
-        shard_messenger: &'a impl AsRef<ShardMessenger>,
-    ) -> MessageCollectorBuilder<'a> {
+        shard_messenger: impl AsRef<ShardMessenger>,
+    ) -> MessageCollectorBuilder {
         MessageCollectorBuilder::new(shard_messenger).guild_id(self.id.0)
     }
 
     /// Await a single reaction in this guild.
     #[cfg(feature = "collector")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "collector")))]
-    pub fn await_reaction<'a>(
-        &self,
-        shard_messenger: &'a impl AsRef<ShardMessenger>,
-    ) -> CollectReaction<'a> {
+    pub fn await_reaction(&self, shard_messenger: impl AsRef<ShardMessenger>) -> CollectReaction {
         CollectReaction::new(shard_messenger).guild_id(self.id.0)
     }
 
     /// Returns a stream builder which can be awaited to obtain a stream of reactions sent in this guild.
     #[cfg(feature = "collector")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "collector")))]
-    pub fn await_reactions<'a>(
+    pub fn await_reactions(
         &self,
-        shard_messenger: &'a impl AsRef<ShardMessenger>,
-    ) -> ReactionCollectorBuilder<'a> {
+        shard_messenger: impl AsRef<ShardMessenger>,
+    ) -> ReactionCollectorBuilder {
         ReactionCollectorBuilder::new(shard_messenger).guild_id(self.id.0)
     }
 
@@ -1478,20 +1639,20 @@ impl<'de> Deserialize<'de> for PartialGuild {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> StdResult<Self, D::Error> {
         let mut map = JsonMap::deserialize(deserializer)?;
 
-        let id = map.get("id").and_then(|x| x.as_str()).and_then(|x| x.parse::<u64>().ok());
+        let id = map.get("id").and_then(Value::as_str).and_then(|x| x.parse::<u64>().ok());
 
         if let Some(guild_id) = id {
-            if let Some(array) = map.get_mut("roles").and_then(|x| x.as_array_mut()) {
+            if let Some(array) = map.get_mut("roles").and_then(Value::as_array_mut) {
                 for value in array {
                     if let Some(role) = value.as_object_mut() {
-                        role.insert("guild_id".to_string(), Value::Number(Number::from(guild_id)));
+                        role.insert("guild_id".to_string(), from_number(guild_id));
                     }
                 }
             }
         }
 
         let afk_channel_id = match map.remove("afk_channel_id") {
-            Some(v) => serde_json::from_value::<Option<ChannelId>>(v).map_err(DeError::custom)?,
+            Some(v) => from_value::<Option<ChannelId>>(v).map_err(DeError::custom)?,
             None => None,
         };
         let afk_timeout = map
@@ -1507,12 +1668,12 @@ impl<'de> Deserialize<'de> for PartialGuild {
         let emojis = map
             .remove("emojis")
             .ok_or_else(|| DeError::custom("expected guild emojis"))
-            .and_then(deserialize_emojis)
+            .and_then(emojis::deserialize)
             .map_err(DeError::custom)?;
         let features = map
             .remove("features")
-            .ok_or_else(|| DeError::custom("expected guild features"))
-            .and_then(serde_json::from_value::<Vec<String>>)
+            .ok_or(Error::Other("expected guild features"))
+            .and_then(from_value::<Vec<String>>)
             .map_err(DeError::custom)?;
         let icon = match map.remove("icon") {
             Some(v) => Option::<String>::deserialize(v).map_err(DeError::custom)?,
@@ -1538,15 +1699,10 @@ impl<'de> Deserialize<'de> for PartialGuild {
             .ok_or_else(|| DeError::custom("expected guild owner_id"))
             .and_then(UserId::deserialize)
             .map_err(DeError::custom)?;
-        let region = map
-            .remove("region")
-            .ok_or_else(|| DeError::custom("expected guild region"))
-            .and_then(String::deserialize)
-            .map_err(DeError::custom)?;
         let roles = map
             .remove("roles")
             .ok_or_else(|| DeError::custom("expected guild roles"))
-            .and_then(deserialize_roles)
+            .and_then(roles::deserialize)
             .map_err(DeError::custom)?;
         let splash = match map.remove("splash") {
             Some(v) => Option::<String>::deserialize(v).map_err(DeError::custom)?,
@@ -1566,7 +1722,10 @@ impl<'de> Deserialize<'de> for PartialGuild {
             None => PremiumTier::default(),
         };
         let premium_subscription_count = match map.remove("premium_subscription_count") {
+            #[cfg(not(feature = "simd-json"))]
             Some(Value::Null) | None => 0,
+            #[cfg(feature = "simd-json")]
+            Some(Value::Static(StaticNode::Null)) | None => 0,
             Some(v) => u64::deserialize(v).map_err(DeError::custom)?,
         };
         let banner = match map.remove("banner") {
@@ -1582,40 +1741,24 @@ impl<'de> Deserialize<'de> for PartialGuild {
             None => None,
         };
 
-        let approximate_member_count = match map.contains_key("approximate_member_count") {
-            true => Some(
-                map.remove("approximate_member_count")
-                    .ok_or_else(|| DeError::custom("expected approximate_member_count"))
-                    .and_then(u64::deserialize)
-                    .map_err(DeError::custom)?,
-            ),
-            false => None,
-        };
-
-        let approximate_presence_count = match map.contains_key("approximate_presence_count") {
-            true => Some(
-                map.remove("approximate_presence_count")
-                    .ok_or_else(|| DeError::custom("expected approximate_presence_count"))
-                    .and_then(u64::deserialize)
-                    .map_err(DeError::custom)?,
-            ),
-            false => None,
-        };
-
-        let owner = match map.contains_key("owner") {
-            true => map
-                .remove("owner")
-                .ok_or_else(|| DeError::custom("expected owner"))
-                .and_then(bool::deserialize)
-                .map_err(DeError::custom)?,
-            false => false,
-        };
-
-        let nsfw = map
-            .remove("nsfw")
-            .ok_or_else(|| DeError::custom("expected approximate_presence_count"))
-            .and_then(bool::deserialize)
+        let approximate_member_count = map
+            .remove("approximate_member_count")
+            .map(u64::deserialize)
+            .transpose()
             .map_err(DeError::custom)?;
+
+        let approximate_presence_count = map
+            .remove("approximate_presence_count")
+            .map(u64::deserialize)
+            .transpose()
+            .map_err(DeError::custom)?;
+
+        let owner = map
+            .remove("owner")
+            .map(bool::deserialize)
+            .transpose()
+            .map_err(DeError::custom)?
+            .unwrap_or_default();
 
         let nsfw_level = map
             .remove("nsfw_level")
@@ -1623,30 +1766,19 @@ impl<'de> Deserialize<'de> for PartialGuild {
             .and_then(NsfwLevel::deserialize)
             .map_err(DeError::custom)?;
 
-        let max_video_channel_users = match map.contains_key("max_video_channel_users") {
-            true => Some(
-                map.remove("max_video_channel_users")
-                    .ok_or_else(|| DeError::custom("expected max_video_channel_users"))
-                    .and_then(u64::deserialize)
-                    .map_err(DeError::custom)?,
-            ),
-            false => None,
-        };
+        let max_video_channel_users = map
+            .remove("max_video_channel_users")
+            .map(u64::deserialize)
+            .transpose()
+            .map_err(DeError::custom)?;
 
         let max_presences = match map.remove("max_presences") {
             Some(v) => Option::<u64>::deserialize(v).map_err(DeError::custom)?,
             None => None,
         };
 
-        let max_members = match map.contains_key("max_members") {
-            true => Some(
-                map.remove("max_members")
-                    .ok_or_else(|| DeError::custom("expected max_members"))
-                    .and_then(u64::deserialize)
-                    .map_err(DeError::custom)?,
-            ),
-            false => None,
-        };
+        let max_members =
+            map.remove("max_members").map(u64::deserialize).transpose().map_err(DeError::custom)?;
 
         let discovery_splash = match map.remove("discovery_splash") {
             Some(v) => Option::<String>::deserialize(v).map_err(DeError::custom)?,
@@ -1689,17 +1821,18 @@ impl<'de> Deserialize<'de> for PartialGuild {
             None => None,
         };
 
-        let welcome_screen = match map.contains_key("welcome_screen") {
-            true => Some(
-                map.remove("welcome_screen")
-                    .ok_or_else(|| DeError::custom("expected welcome_screen"))
-                    .and_then(GuildWelcomeScreen::deserialize)
-                    .map_err(DeError::custom)?,
-            ),
-            false => None,
-        };
+        let welcome_screen = map
+            .remove("welcome_screen")
+            .map(GuildWelcomeScreen::deserialize)
+            .transpose()
+            .map_err(DeError::custom)?;
 
-        #[allow(deprecated)]
+        let stickers = map
+            .remove("stickers")
+            .ok_or_else(|| DeError::custom("expected guild stickers"))
+            .and_then(stickers::deserialize)
+            .map_err(DeError::custom)?;
+
         Ok(Self {
             application_id,
             id,
@@ -1715,7 +1848,6 @@ impl<'de> Deserialize<'de> for PartialGuild {
             name,
             owner_id,
             owner,
-            region,
             roles,
             splash,
             discovery_splash,
@@ -1732,12 +1864,61 @@ impl<'de> Deserialize<'de> for PartialGuild {
             welcome_screen,
             approximate_member_count,
             approximate_presence_count,
-            nsfw,
             nsfw_level,
             max_video_channel_users,
             max_presences,
             max_members,
             permissions,
+            stickers,
         })
+    }
+}
+
+impl From<Guild> for PartialGuild {
+    /// Converts this [`Guild`] instance into a [`PartialGuild`]
+    ///
+    /// [`PartialGuild`] is not a strict subset and contains some data specific to the current user
+    /// that [`Guild`] does not contain. Therefore, this method needs access to cache and HTTP to
+    /// generate the missing data
+    fn from(guild: Guild) -> Self {
+        Self {
+            application_id: guild.application_id,
+            id: guild.id,
+            afk_channel_id: guild.afk_channel_id,
+            afk_timeout: guild.afk_timeout,
+            default_message_notifications: guild.default_message_notifications,
+            widget_enabled: guild.widget_enabled,
+            widget_channel_id: guild.widget_channel_id,
+            emojis: guild.emojis,
+            features: guild.features,
+            icon: guild.icon,
+            mfa_level: guild.mfa_level,
+            name: guild.name,
+            owner_id: guild.owner_id,
+            // Not very good, but PartialGuild deserialization uses .unwrap_or_default() too
+            owner: Default::default(),
+            roles: guild.roles,
+            splash: guild.splash,
+            discovery_splash: guild.discovery_splash,
+            system_channel_id: guild.system_channel_id,
+            system_channel_flags: guild.system_channel_flags,
+            rules_channel_id: guild.rules_channel_id,
+            public_updates_channel_id: guild.public_updates_channel_id,
+            verification_level: guild.verification_level,
+            description: guild.description,
+            premium_tier: guild.premium_tier,
+            premium_subscription_count: guild.premium_subscription_count,
+            banner: guild.banner,
+            vanity_url_code: guild.vanity_url_code,
+            welcome_screen: guild.welcome_screen,
+            approximate_member_count: guild.approximate_member_count,
+            approximate_presence_count: guild.approximate_presence_count,
+            nsfw_level: guild.nsfw_level,
+            max_video_channel_users: guild.max_video_channel_users,
+            max_presences: guild.max_presences,
+            max_members: guild.max_members,
+            permissions: None,
+            stickers: guild.stickers,
+        }
     }
 }
