@@ -1,105 +1,108 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `command_attr/src/lib.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>lib.rs - source</title><link rel="stylesheet" type="text/css" href="../../normalize.css"><link rel="stylesheet" type="text/css" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../light.css"  id="themeStyle"><link rel="stylesheet" type="text/css" href="../../dark.css" disabled ><link rel="stylesheet" type="text/css" href="../../ayu.css" disabled ><script id="default-settings"></script><script src="../../storage.js"></script><script src="../../crates.js"></script><noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="icon" type="image/svg+xml" href="../../favicon.svg">
-<link rel="alternate icon" type="image/png" href="../../favicon-16x16.png">
-<link rel="alternate icon" type="image/png" href="../../favicon-32x32.png"><style type="text/css">#crate-search{background-image:url("../../down-arrow.svg");}</style></head><body class="rustdoc source"><!--[if lte IE 8]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="sidebar-menu" role="button">&#9776;</div><a href='../../command_attr/index.html'><div class='logo-container rust-logo'><img src='../../rust-logo.png' alt='logo'></div></a></nav><div class="theme-picker"><button id="theme-picker" aria-label="Pick another theme!" aria-haspopup="menu"><img src="../../brush.svg" width="18" height="18" alt="Pick another theme!"></button><div id="theme-choices" role="menu"></div></div><nav class="sub"><form class="search-form"><div class="search-container"><div><select id="crate-search"><option value="All crates">All crates</option></select><input class="search-input" name="search" disabled autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"></div><button type="button" class="help-button">?</button>
-                <a id="settings-menu" href="../../settings.html"><img src="../../wheel.svg" width="18" height="18" alt="Change settings"></a></div></form></nav><section id="main" class="content"><pre class="line-numbers"><span id="1">  1</span>
-<span id="2">  2</span>
-<span id="3">  3</span>
-<span id="4">  4</span>
-<span id="5">  5</span>
-<span id="6">  6</span>
-<span id="7">  7</span>
-<span id="8">  8</span>
-<span id="9">  9</span>
-<span id="10"> 10</span>
-<span id="11"> 11</span>
-<span id="12"> 12</span>
-<span id="13"> 13</span>
-<span id="14"> 14</span>
-<span id="15"> 15</span>
-<span id="16"> 16</span>
-<span id="17"> 17</span>
-<span id="18"> 18</span>
-<span id="19"> 19</span>
-<span id="20"> 20</span>
-<span id="21"> 21</span>
-<span id="22"> 22</span>
-<span id="23"> 23</span>
-<span id="24"> 24</span>
-<span id="25"> 25</span>
-<span id="26"> 26</span>
-<span id="27"> 27</span>
-<span id="28"> 28</span>
-<span id="29"> 29</span>
-<span id="30"> 30</span>
-<span id="31"> 31</span>
-<span id="32"> 32</span>
-<span id="33"> 33</span>
-<span id="34"> 34</span>
-<span id="35"> 35</span>
-<span id="36"> 36</span>
-<span id="37"> 37</span>
-<span id="38"> 38</span>
-<span id="39"> 39</span>
-<span id="40"> 40</span>
-<span id="41"> 41</span>
-<span id="42"> 42</span>
-<span id="43"> 43</span>
-<span id="44"> 44</span>
-<span id="45"> 45</span>
-<span id="46"> 46</span>
-<span id="47"> 47</span>
-<span id="48"> 48</span>
-<span id="49"> 49</span>
-<span id="50"> 50</span>
-<span id="51"> 51</span>
-<span id="52"> 52</span>
-<span id="53"> 53</span>
-<span id="54"> 54</span>
-<span id="55"> 55</span>
-<span id="56"> 56</span>
-<span id="57"> 57</span>
-<span id="58"> 58</span>
-<span id="59"> 59</span>
-<span id="60"> 60</span>
-<span id="61"> 61</span>
-<span id="62"> 62</span>
-<span id="63"> 63</span>
-<span id="64"> 64</span>
-<span id="65"> 65</span>
-<span id="66"> 66</span>
-<span id="67"> 67</span>
-<span id="68"> 68</span>
-<span id="69"> 69</span>
-<span id="70"> 70</span>
-<span id="71"> 71</span>
-<span id="72"> 72</span>
-<span id="73"> 73</span>
-<span id="74"> 74</span>
-<span id="75"> 75</span>
-<span id="76"> 76</span>
-<span id="77"> 77</span>
-<span id="78"> 78</span>
-<span id="79"> 79</span>
-<span id="80"> 80</span>
-<span id="81"> 81</span>
-<span id="82"> 82</span>
-<span id="83"> 83</span>
-<span id="84"> 84</span>
-<span id="85"> 85</span>
-<span id="86"> 86</span>
-<span id="87"> 87</span>
-<span id="88"> 88</span>
-<span id="89"> 89</span>
-<span id="90"> 90</span>
-<span id="91"> 91</span>
-<span id="92"> 92</span>
-<span id="93"> 93</span>
-<span id="94"> 94</span>
-<span id="95"> 95</span>
-<span id="96"> 96</span>
-<span id="97"> 97</span>
-<span id="98"> 98</span>
-<span id="99"> 99</span>
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `command_attr/src/lib.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>lib.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" type="text/css" href="../../normalize.css"><link rel="stylesheet" type="text/css" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../ayu.css" disabled><link rel="stylesheet" type="text/css" href="../../dark.css" disabled><link rel="stylesheet" type="text/css" href="../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../storage.js"></script><script defer src="../../source-script.js"></script><script defer src="../../source-files.js"></script><script defer src="../../main.js"></script><noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../command_attr/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div>
+        </a><h2 class="location"></h2>
+    </nav>
+    <nav class="sidebar"><a class="sidebar-logo" href="../../command_attr/index.html"><div class="logo-container"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></div>
+        </a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../command_attr/index.html"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><button type="button" id="help-button" title="help">?</button><div id="settings-menu" tabindex="-1">
+                                <a href="../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../wheel.svg"></a></div>
+                        </div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
 <span id="100">100</span>
 <span id="101">101</span>
 <span id="102">102</span>
@@ -944,34 +947,15 @@
 <span id="941">941</span>
 <span id="942">942</span>
 <span id="943">943</span>
-<span id="944">944</span>
-<span id="945">945</span>
-<span id="946">946</span>
-<span id="947">947</span>
-<span id="948">948</span>
-<span id="949">949</span>
-<span id="950">950</span>
-<span id="951">951</span>
-<span id="952">952</span>
-<span id="953">953</span>
-<span id="954">954</span>
-</pre><div class="example-wrap"><pre class="rust ">
-<span class="attribute">#![<span class="ident">deny</span>(<span class="ident">rust_2018_idioms</span>)]</span>
-<span class="attribute">#![<span class="ident">deny</span>(<span class="ident">broken_intra_doc_links</span>)]</span>
+</pre><pre class="rust"><code><span class="attribute">#![<span class="ident">deny</span>(<span class="ident">rust_2018_idioms</span>)]</span>
 
-<span class="kw">use</span> <span class="ident">proc_macro</span>::<span class="ident">TokenStream</span>;
-<span class="kw">use</span> <span class="ident">proc_macro2</span>::<span class="ident">Span</span>;
-<span class="kw">use</span> <span class="ident">quote</span>::<span class="ident">quote</span>;
-<span class="kw">use</span> <span class="ident">syn</span>::{
-    <span class="ident">parse</span>::{<span class="ident">Error</span>, <span class="ident">Parse</span>, <span class="ident">ParseStream</span>, <span class="prelude-ty">Result</span>},
-    <span class="ident">parse_macro_input</span>,
-    <span class="ident">parse_quote</span>,
-    <span class="ident">punctuated</span>::<span class="ident">Punctuated</span>,
-    <span class="ident">spanned</span>::<span class="ident">Spanned</span>,
-    <span class="ident">Ident</span>,
-    <span class="ident">Lit</span>,
-    <span class="ident">Token</span>,
-};
+<span class="kw">use</span> <span class="ident">proc_macro::TokenStream</span>;
+<span class="kw">use</span> <span class="ident">proc_macro2::Span</span>;
+<span class="kw">use</span> <span class="ident">quote::quote</span>;
+<span class="kw">use</span> <span class="ident">syn::parse</span>::{<span class="ident">Error</span>, <span class="ident">Parse</span>, <span class="ident">ParseStream</span>, <span class="prelude-ty">Result</span>};
+<span class="kw">use</span> <span class="ident">syn::punctuated::Punctuated</span>;
+<span class="kw">use</span> <span class="ident">syn::spanned::Spanned</span>;
+<span class="kw">use</span> <span class="ident">syn</span>::{<span class="ident">parse_macro_input</span>, <span class="ident">parse_quote</span>, <span class="ident">Ident</span>, <span class="ident">Lit</span>, <span class="ident">Token</span>};
 
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">mod</span> <span class="ident">attributes</span>;
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">mod</span> <span class="ident">consts</span>;
@@ -986,13 +970,13 @@
 <span class="kw">use</span> <span class="ident">util</span>::<span class="kw-2">*</span>;
 
 <span class="macro">macro_rules!</span> <span class="ident">match_options</span> {
-    (<span class="macro-nonterminal">$</span><span class="macro-nonterminal">v</span>:<span class="ident">expr</span>, <span class="macro-nonterminal">$</span><span class="macro-nonterminal">values</span>:<span class="ident">ident</span>, <span class="macro-nonterminal">$</span><span class="macro-nonterminal">options</span>:<span class="ident">ident</span>, <span class="macro-nonterminal">$</span><span class="macro-nonterminal">span</span>:<span class="ident">expr</span> <span class="op">=</span><span class="op">&gt;</span> [$(<span class="macro-nonterminal">$</span><span class="macro-nonterminal">name</span>:<span class="ident">ident</span>);<span class="kw-2">*</span>]) <span class="op">=</span><span class="op">&gt;</span> {
+    (<span class="macro-nonterminal">$</span><span class="macro-nonterminal">v</span>:<span class="ident">expr</span>, <span class="macro-nonterminal">$</span><span class="macro-nonterminal">values</span>:<span class="ident">ident</span>, <span class="macro-nonterminal">$</span><span class="macro-nonterminal">options</span>:<span class="ident">ident</span>, <span class="macro-nonterminal">$</span><span class="macro-nonterminal">span</span>:<span class="ident">expr</span> =&gt; [$(<span class="macro-nonterminal">$</span><span class="macro-nonterminal">name</span>:<span class="ident">ident</span>);<span class="kw-2">*</span>]) =&gt; {
         <span class="kw">match</span> <span class="macro-nonterminal">$</span><span class="macro-nonterminal">v</span> {
             $(
-                <span class="macro">stringify!</span>(<span class="macro-nonterminal">$</span><span class="macro-nonterminal">name</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="macro-nonterminal">$</span><span class="macro-nonterminal">options</span>.<span class="macro-nonterminal">$</span><span class="macro-nonterminal">name</span> <span class="op">=</span> <span class="macro">propagate_err!</span>(<span class="macro-nonterminal">$</span><span class="kw">crate</span>::<span class="macro-nonterminal">attributes</span>::<span class="ident">parse</span>(<span class="macro-nonterminal">$</span><span class="macro-nonterminal">values</span>)),
+                <span class="macro">stringify!</span>(<span class="macro-nonterminal">$</span><span class="macro-nonterminal">name</span>) =&gt; <span class="macro-nonterminal">$</span><span class="macro-nonterminal">options</span>.<span class="macro-nonterminal">$</span><span class="macro-nonterminal">name</span> <span class="op">=</span> <span class="macro">propagate_err!</span>(<span class="macro-nonterminal">$</span><span class="macro-nonterminal">crate::attributes::parse</span>(<span class="macro-nonterminal">$</span><span class="macro-nonterminal">values</span>)),
             )<span class="op">*</span>
-            <span class="kw">_</span> <span class="op">=</span><span class="op">&gt;</span> {
-                <span class="kw">return</span> <span class="ident">Error</span>::<span class="ident">new</span>(<span class="macro-nonterminal">$</span><span class="macro-nonterminal">span</span>, <span class="macro">format_args!</span>(<span class="string">&quot;invalid attribute: {:?}&quot;</span>, <span class="macro-nonterminal">$</span><span class="macro-nonterminal">v</span>))
+            <span class="kw">_</span> =&gt; {
+                <span class="kw">return</span> <span class="ident">Error::new</span>(<span class="macro-nonterminal">$</span><span class="macro-nonterminal">span</span>, <span class="macro">format_args!</span>(<span class="string">&quot;invalid attribute: {:?}&quot;</span>, <span class="macro-nonterminal">$</span><span class="macro-nonterminal">v</span>))
                     .<span class="ident">to_compile_error</span>()
                     .<span class="ident">into</span>();
             },
@@ -1027,7 +1011,7 @@
 <span class="doccomment">/// | `#[example(ex)]` &lt;/br&gt; `#[example = ex]`                                     | An example of the command&#39;s usage. May be called multiple times to add many examples at once.            | `ex` is a string                                                                                                                                                                                                                 |</span>
 <span class="doccomment">/// | `#[delimiters(delims)]`                                                      | Argument delimiters specific to this command. Overrides the global list of delimiters in the framework.  | `delims` is a comma separated list of strings |</span>
 <span class="doccomment">/// | `#[min_args(min)]` &lt;/br&gt; `#[max_args(max)]` &lt;/br&gt; `#[num_args(min_and_max)]` | The expected length of arguments that the command must receive in order to function correctly.           | `min`, `max` and `min_and_max` are 16-bit, unsigned integers.                                                                                                                                                                    |</span>
-<span class="doccomment">/// | `#[required_permissions(perms)]`                                             | Set of permissions the user must possess.                                                                | `perms` is a comma separated list of permission names.&lt;/br&gt; These can be found at [Discord&#39;s official documentation](https://discord.com/developers/docs/topics/permissions).                                                 |</span>
+<span class="doccomment">/// | `#[required_permissions(perms)]`                                             | Set of permissions the user must possess. &lt;/br&gt; In order for this attribute to work, &quot;Presence Intent&quot; and &quot;Server Member Intent&quot; options in bot application must be enabled and all intent flags must be enabled during client creation. | `perms` is a comma separated list of permission names.&lt;/br&gt; These can be found at [Discord&#39;s official documentation](https://discord.com/developers/docs/topics/permissions).        |</span>
 <span class="doccomment">/// | `#[allowed_roles(roles)]`                                                    | Set of roles the user must possess.                                                                      | `roles` is a comma separated list of role names.                                                                                                                                                                                 |</span>
 <span class="doccomment">/// | `#[help_available]` &lt;/br&gt; `#[help_available(b)]`                             | If the command should be displayed in the help message.                                                  | `b` is a boolean. If no boolean is provided, the value is assumed to be `true`.                                                                                                                                                  |</span>
 <span class="doccomment">/// | `#[only_in(ctx)]`                                                            | Which environment the command can be executed in.                                                        | `ctx` is a string with the accepted values `guild`/`guilds` and `dm`/`dms` (Direct Message).                                                                                                                                     |</span>
@@ -1056,16 +1040,16 @@
 <span class="doccomment">/// pub static FOO_COMMAND: Command = Command { options: FOO_COMMAND_OPTIONS, ... };</span>
 <span class="doccomment">/// ```</span>
 <span class="attribute">#[<span class="ident">proc_macro_attribute</span>]</span>
-<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">command</span>(<span class="ident">attr</span>: <span class="ident">TokenStream</span>, <span class="ident">input</span>: <span class="ident">TokenStream</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">TokenStream</span> {
+<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">command</span>(<span class="ident">attr</span>: <span class="ident">TokenStream</span>, <span class="ident">input</span>: <span class="ident">TokenStream</span>) -&gt; <span class="ident">TokenStream</span> {
     <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">fun</span> <span class="op">=</span> <span class="macro">parse_macro_input!</span>(<span class="ident">input</span> <span class="kw">as</span> <span class="ident">CommandFun</span>);
 
-    <span class="kw">let</span> <span class="ident">_name</span> <span class="op">=</span> <span class="kw">if</span> <span class="op">!</span><span class="ident">attr</span>.<span class="ident">is_empty</span>() {
-        <span class="macro">parse_macro_input!</span>(<span class="ident">attr</span> <span class="kw">as</span> <span class="ident">Lit</span>).<span class="ident">to_str</span>()
+    <span class="kw">let</span> <span class="ident">_name</span> <span class="op">=</span> <span class="kw">if</span> <span class="ident">attr</span>.<span class="ident">is_empty</span>() {
+        <span class="ident">fun</span>.<span class="ident">name</span>.<span class="ident">to_string_non_raw</span>()
     } <span class="kw">else</span> {
-        <span class="ident">fun</span>.<span class="ident">name</span>.<span class="ident">to_string</span>()
+        <span class="macro">parse_macro_input!</span>(<span class="ident">attr</span> <span class="kw">as</span> <span class="ident">Lit</span>).<span class="ident">to_str</span>()
     };
 
-    <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">options</span> <span class="op">=</span> <span class="ident">Options</span>::<span class="ident">new</span>();
+    <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">options</span> <span class="op">=</span> <span class="ident">Options::new</span>();
 
     <span class="kw">for</span> <span class="ident">attribute</span> <span class="kw">in</span> <span class="kw-2">&amp;</span><span class="ident">fun</span>.<span class="ident">attributes</span> {
         <span class="kw">let</span> <span class="ident">span</span> <span class="op">=</span> <span class="ident">attribute</span>.<span class="ident">span</span>();
@@ -1075,21 +1059,21 @@
         <span class="kw">let</span> <span class="ident">name</span> <span class="op">=</span> <span class="kw-2">&amp;</span><span class="ident">name</span>[..];
 
         <span class="kw">match</span> <span class="ident">name</span> {
-            <span class="string">&quot;num_args&quot;</span> <span class="op">=</span><span class="op">&gt;</span> {
-                <span class="kw">let</span> <span class="ident">args</span> <span class="op">=</span> <span class="macro">propagate_err!</span>(<span class="ident">u16</span>::<span class="ident">parse</span>(<span class="ident">values</span>));
+            <span class="string">&quot;num_args&quot;</span> =&gt; {
+                <span class="kw">let</span> <span class="ident">args</span> <span class="op">=</span> <span class="macro">propagate_err!</span>(<span class="ident">u16::parse</span>(<span class="ident">values</span>));
 
                 <span class="ident">options</span>.<span class="ident">min_args</span> <span class="op">=</span> <span class="ident">AsOption</span>(<span class="prelude-val">Some</span>(<span class="ident">args</span>));
                 <span class="ident">options</span>.<span class="ident">max_args</span> <span class="op">=</span> <span class="ident">AsOption</span>(<span class="prelude-val">Some</span>(<span class="ident">args</span>));
             },
-            <span class="string">&quot;example&quot;</span> <span class="op">=</span><span class="op">&gt;</span> {
-                <span class="ident">options</span>.<span class="ident">examples</span>.<span class="ident">push</span>(<span class="macro">propagate_err!</span>(<span class="ident">attributes</span>::<span class="ident">parse</span>(<span class="ident">values</span>)));
+            <span class="string">&quot;example&quot;</span> =&gt; {
+                <span class="ident">options</span>.<span class="ident">examples</span>.<span class="ident">push</span>(<span class="macro">propagate_err!</span>(<span class="ident">attributes::parse</span>(<span class="ident">values</span>)));
             },
-            <span class="string">&quot;description&quot;</span> <span class="op">=</span><span class="op">&gt;</span> {
-                <span class="kw">let</span> <span class="ident">line</span>: <span class="ident">String</span> <span class="op">=</span> <span class="macro">propagate_err!</span>(<span class="ident">attributes</span>::<span class="ident">parse</span>(<span class="ident">values</span>));
-                <span class="ident">util</span>::<span class="ident">append_line</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">options</span>.<span class="ident">description</span>, <span class="ident">line</span>);
+            <span class="string">&quot;description&quot;</span> =&gt; {
+                <span class="kw">let</span> <span class="ident">line</span>: <span class="ident">String</span> <span class="op">=</span> <span class="macro">propagate_err!</span>(<span class="ident">attributes::parse</span>(<span class="ident">values</span>));
+                <span class="ident">util::append_line</span>(<span class="kw-2">&amp;mut</span> <span class="ident">options</span>.<span class="ident">description</span>, <span class="ident">line</span>);
             },
-            <span class="kw">_</span> <span class="op">=</span><span class="op">&gt;</span> {
-                <span class="macro">match_options!</span>(<span class="ident">name</span>, <span class="ident">values</span>, <span class="ident">options</span>, <span class="ident">span</span> <span class="op">=</span><span class="op">&gt;</span> [
+            <span class="kw">_</span> =&gt; {
+                <span class="macro">match_options!</span>(<span class="ident">name</span>, <span class="ident">values</span>, <span class="ident">options</span>, <span class="ident">span</span> =&gt; [
                     <span class="ident">checks</span>;
                     <span class="ident">bucket</span>;
                     <span class="ident">aliases</span>;
@@ -1128,10 +1112,10 @@
         <span class="ident">sub_commands</span>,
     } <span class="op">=</span> <span class="ident">options</span>;
 
-    <span class="macro">propagate_err!</span>(<span class="ident">create_declaration_validations</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">fun</span>, <span class="ident">DeclarFor</span>::<span class="ident">Command</span>));
+    <span class="macro">propagate_err!</span>(<span class="ident">create_declaration_validations</span>(<span class="kw-2">&amp;mut</span> <span class="ident">fun</span>, <span class="ident">DeclarFor::Command</span>));
 
-    <span class="kw">let</span> <span class="ident">res</span> <span class="op">=</span> <span class="macro">parse_quote!</span>(<span class="ident">serenity</span>::<span class="ident">framework</span>::<span class="ident">standard</span>::<span class="ident">CommandResult</span>);
-    <span class="ident">create_return_type_validation</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">fun</span>, <span class="ident">res</span>);
+    <span class="kw">let</span> <span class="ident">res</span> <span class="op">=</span> <span class="macro">parse_quote!</span>(<span class="ident">serenity::framework::standard::CommandResult</span>);
+    <span class="ident">create_return_type_validation</span>(<span class="kw-2">&amp;mut</span> <span class="ident">fun</span>, <span class="kw-2">&amp;</span><span class="ident">res</span>);
 
     <span class="kw">let</span> <span class="ident">visibility</span> <span class="op">=</span> <span class="ident">fun</span>.<span class="ident">visibility</span>;
     <span class="kw">let</span> <span class="ident">name</span> <span class="op">=</span> <span class="ident">fun</span>.<span class="ident">name</span>.<span class="ident">clone</span>();
@@ -1144,10 +1128,10 @@
 
     <span class="kw">let</span> <span class="ident">cooked</span> <span class="op">=</span> <span class="ident">fun</span>.<span class="ident">cooked</span>.<span class="ident">clone</span>();
 
-    <span class="kw">let</span> <span class="ident">options_path</span> <span class="op">=</span> <span class="macro">quote!</span>(<span class="ident">serenity</span>::<span class="ident">framework</span>::<span class="ident">standard</span>::<span class="ident">CommandOptions</span>);
-    <span class="kw">let</span> <span class="ident">command_path</span> <span class="op">=</span> <span class="macro">quote!</span>(<span class="ident">serenity</span>::<span class="ident">framework</span>::<span class="ident">standard</span>::<span class="ident">Command</span>);
+    <span class="kw">let</span> <span class="ident">options_path</span> <span class="op">=</span> <span class="macro">quote!</span>(<span class="ident">serenity::framework::standard::CommandOptions</span>);
+    <span class="kw">let</span> <span class="ident">command_path</span> <span class="op">=</span> <span class="macro">quote!</span>(<span class="ident">serenity::framework::standard::Command</span>);
 
-    <span class="ident">populate_fut_lifetimes_on_refs</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">fun</span>.<span class="ident">args</span>);
+    <span class="ident">populate_fut_lifetimes_on_refs</span>(<span class="kw-2">&amp;mut</span> <span class="ident">fun</span>.<span class="ident">args</span>);
     <span class="kw">let</span> <span class="ident">args</span> <span class="op">=</span> <span class="ident">fun</span>.<span class="ident">args</span>;
 
     (<span class="macro">quote!</span> {
@@ -1181,10 +1165,12 @@
 
         #(#<span class="ident">cooked</span>)<span class="op">*</span>
         <span class="attribute">#[<span class="ident">allow</span>(<span class="ident">missing_docs</span>)]</span>
-        #<span class="ident">visibility</span> <span class="kw">fn</span> #<span class="ident">name</span><span class="op">&lt;</span><span class="lifetime">&#39;fut</span><span class="op">&gt;</span> (#(#<span class="ident">args</span>),<span class="kw-2">*</span>) <span class="op">-</span><span class="op">&gt;</span> ::<span class="ident">serenity</span>::<span class="ident">futures</span>::<span class="ident">future</span>::<span class="ident">BoxFuture</span><span class="op">&lt;</span><span class="lifetime">&#39;fut</span>, #<span class="ident">ret</span><span class="op">&gt;</span> {
-            <span class="kw">use</span> ::<span class="ident">serenity</span>::<span class="ident">futures</span>::<span class="ident">future</span>::<span class="ident">FutureExt</span>;
-
-            <span class="kw">async</span> <span class="kw">move</span> { #(#<span class="ident">body</span>)<span class="op">*</span> }.<span class="ident">boxed</span>()
+        #<span class="ident">visibility</span> <span class="kw">fn</span> #<span class="ident">name</span><span class="op">&lt;</span><span class="lifetime">&#39;fut</span><span class="op">&gt;</span> (#(#<span class="ident">args</span>),<span class="kw-2">*</span>) -&gt; <span class="ident">std::pin::Pin</span><span class="op">&lt;</span><span class="ident">Box</span><span class="op">&lt;</span><span class="kw">dyn</span> <span class="ident">std::future::Future</span><span class="op">&lt;</span><span class="ident">Output</span> <span class="op">=</span> #<span class="ident">ret</span><span class="op">&gt;</span> <span class="op">+</span> <span class="ident">Send</span> <span class="op">+</span> <span class="lifetime">&#39;fut</span><span class="op">&gt;</span><span class="op">&gt;</span> {
+            <span class="ident">Box::pin</span>(<span class="kw">async</span> <span class="kw">move</span> {
+                <span class="kw">let</span> <span class="ident">_output</span>: #<span class="ident">ret</span> <span class="op">=</span> { #(#<span class="ident">body</span>)<span class="op">*</span> };
+                <span class="attribute">#[<span class="ident">allow</span>(<span class="ident">unreachable_code</span>)]</span>
+                <span class="ident">_output</span>
+            })
         }
     })
     .<span class="ident">into</span>()
@@ -1226,33 +1212,33 @@
 <span class="doccomment">/// | `#[wrong_channel(s)]` &lt;/br&gt; `#[wrong_channel = s]`                                                                                            | If a user is using the help-command in a channel where a command is not available, this behaviour will be executed.                                                                                                                              | `s` is a string. Accepts `strike` (strikethroughs), `hide` (will not be listed) or `nothing`(leave be).    |</span>
 <span class="doccomment">/// | `#[embed_error_colour(n)]`                                                                                                                    | Colour that the help-embed will use upon an error.                                                                                                                                                                                               | `n` is a name to one of the provided constants of the `Colour` struct or an RGB value `#RRGGBB`.           |</span>
 <span class="doccomment">/// | `#[embed_success_colour(n)]`                                                                                                                  | Colour that the help-embed will use normally.                                                                                                                                                                                                    | `n` is a name to one of the provided constants of the `Colour` struct or an RGB value `#RRGGBB`.           |</span>
-<span class="doccomment">/// | `#[max_levenshtein_distance(n)]`                                                                                                              | How much should the help command search for a similiar name.&lt;/br&gt; Indicator for a nested guild. The prefix will be repeated based on what kind of level the item sits. A sub-group would be level two, a sub-sub-group would be level three.     | `n` is a 64-bit, unsigned integer.                                                                         |</span>
+<span class="doccomment">/// | `#[max_levenshtein_distance(n)]`                                                                                                              | How much should the help command search for a similar name.&lt;/br&gt; Indicator for a nested guild. The prefix will be repeated based on what kind of level the item sits. A sub-group would be level two, a sub-sub-group would be level three.     | `n` is a 64-bit, unsigned integer.                                                                         |</span>
 <span class="doccomment">/// | `#[indention_prefix(s)]` &lt;/br&gt; `#[indention_prefix = s]`                                                                                      | The prefix used to express how deeply nested a command or group is.                                                                                                                                                                              | `s` is a string                                                                                            |</span>
 <span class="doccomment">///</span>
 <span class="doccomment">/// [`command`]: macro@command</span>
 <span class="attribute">#[<span class="ident">proc_macro_attribute</span>]</span>
-<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">help</span>(<span class="ident">attr</span>: <span class="ident">TokenStream</span>, <span class="ident">input</span>: <span class="ident">TokenStream</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">TokenStream</span> {
+<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">help</span>(<span class="ident">attr</span>: <span class="ident">TokenStream</span>, <span class="ident">input</span>: <span class="ident">TokenStream</span>) -&gt; <span class="ident">TokenStream</span> {
     <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">fun</span> <span class="op">=</span> <span class="macro">parse_macro_input!</span>(<span class="ident">input</span> <span class="kw">as</span> <span class="ident">CommandFun</span>);
 
-    <span class="kw">let</span> <span class="ident">names</span> <span class="op">=</span> <span class="kw">if</span> <span class="op">!</span><span class="ident">attr</span>.<span class="ident">is_empty</span>() {
+    <span class="kw">let</span> <span class="ident">names</span> <span class="op">=</span> <span class="kw">if</span> <span class="ident">attr</span>.<span class="ident">is_empty</span>() {
+        <span class="macro">vec!</span>[<span class="string">&quot;help&quot;</span>.<span class="ident">to_string</span>()]
+    } <span class="kw">else</span> {
         <span class="kw">struct</span> <span class="ident">Names</span>(<span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">String</span><span class="op">&gt;</span>);
 
         <span class="kw">impl</span> <span class="ident">Parse</span> <span class="kw">for</span> <span class="ident">Names</span> {
-            <span class="kw">fn</span> <span class="ident">parse</span>(<span class="ident">input</span>: <span class="ident">ParseStream</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span><span class="op">&gt;</span> {
-                <span class="kw">let</span> <span class="ident">n</span>: <span class="ident">Punctuated</span><span class="op">&lt;</span><span class="ident">Lit</span>, <span class="macro">Token!</span>[,]<span class="op">&gt;</span> <span class="op">=</span> <span class="ident">input</span>.<span class="ident">parse_terminated</span>(<span class="ident">Lit</span>::<span class="ident">parse</span>)<span class="question-mark">?</span>;
+            <span class="kw">fn</span> <span class="ident">parse</span>(<span class="ident">input</span>: <span class="ident">ParseStream</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span><span class="op">&gt;</span> {
+                <span class="kw">let</span> <span class="ident">n</span>: <span class="ident">Punctuated</span><span class="op">&lt;</span><span class="ident">Lit</span>, <span class="macro">Token!</span>[,]<span class="op">&gt;</span> <span class="op">=</span> <span class="ident">input</span>.<span class="ident">parse_terminated</span>(<span class="ident">Lit::parse</span>)<span class="question-mark">?</span>;
                 <span class="prelude-val">Ok</span>(<span class="ident">Names</span>(<span class="ident">n</span>.<span class="ident">into_iter</span>().<span class="ident">map</span>(<span class="op">|</span><span class="ident">l</span><span class="op">|</span> <span class="ident">l</span>.<span class="ident">to_str</span>()).<span class="ident">collect</span>()))
             }
         }
         <span class="kw">let</span> <span class="ident">Names</span>(<span class="ident">names</span>) <span class="op">=</span> <span class="macro">parse_macro_input!</span>(<span class="ident">attr</span> <span class="kw">as</span> <span class="ident">Names</span>);
 
         <span class="ident">names</span>
-    } <span class="kw">else</span> {
-        <span class="macro">vec!</span>[<span class="string">&quot;help&quot;</span>.<span class="ident">to_string</span>()]
     };
 
     <span class="comment">// Revert the change for the names of documentation attributes done when</span>
     <span class="comment">// parsing the function input with `CommandFun`.</span>
-    <span class="ident">util</span>::<span class="ident">rename_attributes</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">fun</span>.<span class="ident">attributes</span>, <span class="string">&quot;description&quot;</span>, <span class="string">&quot;doc&quot;</span>);
+    <span class="ident">util::rename_attributes</span>(<span class="kw-2">&amp;mut</span> <span class="ident">fun</span>.<span class="ident">attributes</span>, <span class="string">&quot;description&quot;</span>, <span class="string">&quot;doc&quot;</span>);
 
     <span class="comment">// Additionally, place the documentation attributes to the `cooked` list</span>
     <span class="comment">// to prevent the macro from rejecting them as invalid attributes.</span>
@@ -1268,7 +1254,7 @@
         }
     }
 
-    <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">options</span> <span class="op">=</span> <span class="ident">HelpOptions</span>::<span class="ident">default</span>();
+    <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">options</span> <span class="op">=</span> <span class="ident">HelpOptions::default</span>();
 
     <span class="kw">for</span> <span class="ident">attribute</span> <span class="kw">in</span> <span class="kw-2">&amp;</span><span class="ident">fun</span>.<span class="ident">attributes</span> {
         <span class="kw">let</span> <span class="ident">span</span> <span class="op">=</span> <span class="ident">attribute</span>.<span class="ident">span</span>();
@@ -1277,7 +1263,7 @@
         <span class="kw">let</span> <span class="ident">name</span> <span class="op">=</span> <span class="ident">values</span>.<span class="ident">name</span>.<span class="ident">to_string</span>();
         <span class="kw">let</span> <span class="ident">name</span> <span class="op">=</span> <span class="kw-2">&amp;</span><span class="ident">name</span>[..];
 
-        <span class="macro">match_options!</span>(<span class="ident">name</span>, <span class="ident">values</span>, <span class="ident">options</span>, <span class="ident">span</span> <span class="op">=</span><span class="op">&gt;</span> [
+        <span class="macro">match_options!</span>(<span class="ident">name</span>, <span class="ident">values</span>, <span class="ident">options</span>, <span class="ident">span</span> =&gt; [
             <span class="ident">suggestion_text</span>;
             <span class="ident">no_help_available_text</span>;
             <span class="ident">usage_label</span>;
@@ -1309,14 +1295,14 @@
         ]);
     }
 
-    <span class="kw">fn</span> <span class="ident">produce_strike_text</span>(<span class="ident">options</span>: <span class="kw-2">&amp;</span><span class="ident">HelpOptions</span>, <span class="ident">dm_or_guild</span>: <span class="kw-2">&amp;</span><span class="ident">str</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">String</span><span class="op">&gt;</span> {
-        <span class="kw">use</span> <span class="ident">std</span>::<span class="ident">fmt</span>::<span class="ident">Write</span>;
+    <span class="kw">fn</span> <span class="ident">produce_strike_text</span>(<span class="ident">options</span>: <span class="kw-2">&amp;</span><span class="ident">HelpOptions</span>, <span class="ident">dm_or_guild</span>: <span class="kw-2">&amp;</span><span class="ident">str</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">String</span><span class="op">&gt;</span> {
+        <span class="kw">use</span> <span class="ident">std::fmt::Write</span>;
 
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">strike_text</span> <span class="op">=</span>
-            <span class="ident">String</span>::<span class="ident">from</span>(<span class="string">&quot;~~`Strikethrough commands`~~ are unavailable because they&quot;</span>);
+            <span class="ident">String::from</span>(<span class="string">&quot;~~`Strikethrough commands`~~ are unavailable because they&quot;</span>);
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">is_any_option_strike</span> <span class="op">=</span> <span class="bool-val">false</span>;
 
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">concat_with_comma</span> <span class="op">=</span> <span class="kw">if</span> <span class="ident">options</span>.<span class="ident">lacking_permissions</span> <span class="op">=</span><span class="op">=</span> <span class="ident">HelpBehaviour</span>::<span class="ident">Strike</span> {
+        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">concat_with_comma</span> <span class="op">=</span> <span class="kw">if</span> <span class="kw">let</span> <span class="ident">HelpBehaviour::Strike</span> <span class="op">=</span> <span class="ident">options</span>.<span class="ident">lacking_permissions</span> {
             <span class="ident">is_any_option_strike</span> <span class="op">=</span> <span class="bool-val">true</span>;
             <span class="ident">strike_text</span>.<span class="ident">push_str</span>(<span class="string">&quot; require permissions&quot;</span>);
 
@@ -1325,7 +1311,7 @@
             <span class="bool-val">false</span>
         };
 
-        <span class="kw">if</span> <span class="ident">options</span>.<span class="ident">lacking_role</span> <span class="op">=</span><span class="op">=</span> <span class="ident">HelpBehaviour</span>::<span class="ident">Strike</span> {
+        <span class="kw">if</span> <span class="kw">let</span> <span class="ident">HelpBehaviour::Strike</span> <span class="op">=</span> <span class="ident">options</span>.<span class="ident">lacking_role</span> {
             <span class="ident">is_any_option_strike</span> <span class="op">=</span> <span class="bool-val">true</span>;
 
             <span class="kw">if</span> <span class="ident">concat_with_comma</span> {
@@ -1336,7 +1322,7 @@
             }
         }
 
-        <span class="kw">if</span> <span class="ident">options</span>.<span class="ident">lacking_conditions</span> <span class="op">=</span><span class="op">=</span> <span class="ident">HelpBehaviour</span>::<span class="ident">Strike</span> {
+        <span class="kw">if</span> <span class="kw">let</span> <span class="ident">HelpBehaviour::Strike</span> <span class="op">=</span> <span class="ident">options</span>.<span class="ident">lacking_conditions</span> {
             <span class="ident">is_any_option_strike</span> <span class="op">=</span> <span class="bool-val">true</span>;
 
             <span class="kw">if</span> <span class="ident">concat_with_comma</span> {
@@ -1347,7 +1333,7 @@
             }
         }
 
-        <span class="kw">if</span> <span class="ident">options</span>.<span class="ident">wrong_channel</span> <span class="op">=</span><span class="op">=</span> <span class="ident">HelpBehaviour</span>::<span class="ident">Strike</span> {
+        <span class="kw">if</span> <span class="kw">let</span> <span class="ident">HelpBehaviour::Strike</span> <span class="op">=</span> <span class="ident">options</span>.<span class="ident">wrong_channel</span> {
             <span class="ident">is_any_option_strike</span> <span class="op">=</span> <span class="bool-val">true</span>;
 
             <span class="kw">if</span> <span class="ident">concat_with_comma</span> {
@@ -1366,13 +1352,13 @@
         }
     }
 
-    <span class="kw">if</span> <span class="ident">options</span>.<span class="ident">strikethrough_commands_tip_in_dm</span> <span class="op">=</span><span class="op">=</span> <span class="prelude-val">None</span> {
-        <span class="ident">options</span>.<span class="ident">strikethrough_commands_tip_in_dm</span> <span class="op">=</span> <span class="ident">produce_strike_text</span>(<span class="kw-2">&amp;</span><span class="ident">options</span>, <span class="string">&quot;direct messages&quot;</span>);
+    <span class="kw">if</span> <span class="ident">options</span>.<span class="ident">strikethrough_commands_tip_in_dm</span> <span class="op">==</span> <span class="prelude-val">None</span> {
+        <span class="ident">options</span>.<span class="ident">strikethrough_commands_tip_in_dm</span> <span class="op">=</span> <span class="ident">produce_strike_text</span>(<span class="kw-2">&amp;</span><span class="ident">options</span>, <span class="string">&quot;server messages&quot;</span>);
     }
 
-    <span class="kw">if</span> <span class="ident">options</span>.<span class="ident">strikethrough_commands_tip_in_guild</span> <span class="op">=</span><span class="op">=</span> <span class="prelude-val">None</span> {
+    <span class="kw">if</span> <span class="ident">options</span>.<span class="ident">strikethrough_commands_tip_in_guild</span> <span class="op">==</span> <span class="prelude-val">None</span> {
         <span class="ident">options</span>.<span class="ident">strikethrough_commands_tip_in_guild</span> <span class="op">=</span>
-            <span class="ident">produce_strike_text</span>(<span class="kw-2">&amp;</span><span class="ident">options</span>, <span class="string">&quot;server messages&quot;</span>);
+            <span class="ident">produce_strike_text</span>(<span class="kw-2">&amp;</span><span class="ident">options</span>, <span class="string">&quot;direct messages&quot;</span>);
     }
 
     <span class="kw">let</span> <span class="ident">HelpOptions</span> {
@@ -1409,10 +1395,10 @@
     <span class="kw">let</span> <span class="ident">strikethrough_commands_tip_in_dm</span> <span class="op">=</span> <span class="ident">AsOption</span>(<span class="ident">strikethrough_commands_tip_in_dm</span>);
     <span class="kw">let</span> <span class="ident">strikethrough_commands_tip_in_guild</span> <span class="op">=</span> <span class="ident">AsOption</span>(<span class="ident">strikethrough_commands_tip_in_guild</span>);
 
-    <span class="macro">propagate_err!</span>(<span class="ident">create_declaration_validations</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">fun</span>, <span class="ident">DeclarFor</span>::<span class="ident">Help</span>));
+    <span class="macro">propagate_err!</span>(<span class="ident">create_declaration_validations</span>(<span class="kw-2">&amp;mut</span> <span class="ident">fun</span>, <span class="ident">DeclarFor::Help</span>));
 
-    <span class="kw">let</span> <span class="ident">res</span> <span class="op">=</span> <span class="macro">parse_quote!</span>(<span class="ident">serenity</span>::<span class="ident">framework</span>::<span class="ident">standard</span>::<span class="ident">CommandResult</span>);
-    <span class="ident">create_return_type_validation</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">fun</span>, <span class="ident">res</span>);
+    <span class="kw">let</span> <span class="ident">res</span> <span class="op">=</span> <span class="macro">parse_quote!</span>(<span class="ident">serenity::framework::standard::CommandResult</span>);
+    <span class="ident">create_return_type_validation</span>(<span class="kw-2">&amp;mut</span> <span class="ident">fun</span>, <span class="kw-2">&amp;</span><span class="ident">res</span>);
 
     <span class="kw">let</span> <span class="ident">options</span> <span class="op">=</span> <span class="ident">fun</span>.<span class="ident">name</span>.<span class="ident">with_suffix</span>(<span class="ident">HELP_OPTIONS</span>);
 
@@ -1421,12 +1407,12 @@
 
     <span class="kw">let</span> <span class="ident">cooked</span> <span class="op">=</span> <span class="ident">fun</span>.<span class="ident">cooked</span>.<span class="ident">clone</span>();
 
-    <span class="kw">let</span> <span class="ident">options_path</span> <span class="op">=</span> <span class="macro">quote!</span>(<span class="ident">serenity</span>::<span class="ident">framework</span>::<span class="ident">standard</span>::<span class="ident">HelpOptions</span>);
-    <span class="kw">let</span> <span class="ident">command_path</span> <span class="op">=</span> <span class="macro">quote!</span>(<span class="ident">serenity</span>::<span class="ident">framework</span>::<span class="ident">standard</span>::<span class="ident">HelpCommand</span>);
+    <span class="kw">let</span> <span class="ident">options_path</span> <span class="op">=</span> <span class="macro">quote!</span>(<span class="ident">serenity::framework::standard::HelpOptions</span>);
+    <span class="kw">let</span> <span class="ident">command_path</span> <span class="op">=</span> <span class="macro">quote!</span>(<span class="ident">serenity::framework::standard::HelpCommand</span>);
 
     <span class="kw">let</span> <span class="ident">body</span> <span class="op">=</span> <span class="ident">fun</span>.<span class="ident">body</span>;
     <span class="kw">let</span> <span class="ident">ret</span> <span class="op">=</span> <span class="ident">fun</span>.<span class="ident">ret</span>;
-    <span class="ident">populate_fut_lifetimes_on_refs</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">fun</span>.<span class="ident">args</span>);
+    <span class="ident">populate_fut_lifetimes_on_refs</span>(<span class="kw-2">&amp;mut</span> <span class="ident">fun</span>.<span class="ident">args</span>);
     <span class="kw">let</span> <span class="ident">args</span> <span class="op">=</span> <span class="ident">fun</span>.<span class="ident">args</span>;
 
     (<span class="macro">quote!</span> {
@@ -1473,10 +1459,12 @@
 
         #(#<span class="ident">cooked</span>)<span class="op">*</span>
         <span class="attribute">#[<span class="ident">allow</span>(<span class="ident">missing_docs</span>)]</span>
-        <span class="kw">pub</span> <span class="kw">fn</span> #<span class="ident">nn</span><span class="op">&lt;</span><span class="lifetime">&#39;fut</span><span class="op">&gt;</span>(#(#<span class="ident">args</span>),<span class="kw-2">*</span>) <span class="op">-</span><span class="op">&gt;</span> ::<span class="ident">serenity</span>::<span class="ident">futures</span>::<span class="ident">future</span>::<span class="ident">BoxFuture</span><span class="op">&lt;</span><span class="lifetime">&#39;fut</span>, #<span class="ident">ret</span><span class="op">&gt;</span> {
-            <span class="kw">use</span> ::<span class="ident">serenity</span>::<span class="ident">futures</span>::<span class="ident">future</span>::<span class="ident">FutureExt</span>;
-
-            <span class="kw">async</span> <span class="kw">move</span> { #(#<span class="ident">body</span>)<span class="op">*</span> }.<span class="ident">boxed</span>()
+        <span class="kw">pub</span> <span class="kw">fn</span> #<span class="ident">nn</span><span class="op">&lt;</span><span class="lifetime">&#39;fut</span><span class="op">&gt;</span>(#(#<span class="ident">args</span>),<span class="kw-2">*</span>) -&gt; <span class="ident">std::pin::Pin</span><span class="op">&lt;</span><span class="ident">Box</span><span class="op">&lt;</span><span class="kw">dyn</span> <span class="ident">std::future::Future</span><span class="op">&lt;</span><span class="ident">Output</span> <span class="op">=</span> #<span class="ident">ret</span><span class="op">&gt;</span> <span class="op">+</span> <span class="ident">Send</span> <span class="op">+</span> <span class="lifetime">&#39;fut</span><span class="op">&gt;</span><span class="op">&gt;</span> {
+            <span class="ident">Box::pin</span>(<span class="kw">async</span> <span class="kw">move</span> {
+                <span class="kw">let</span> <span class="ident">_output</span>: #<span class="ident">ret</span> <span class="op">=</span> { #(#<span class="ident">body</span>)<span class="op">*</span> };
+                <span class="attribute">#[<span class="ident">allow</span>(<span class="ident">unreachable_code</span>)]</span>
+                <span class="ident">_output</span>
+            })
         }
     })
     .<span class="ident">into</span>()
@@ -1546,7 +1534,7 @@
 <span class="doccomment">/// | `#[owner_privilege]` &lt;/br&gt; `#[owner_privilege(b)]`   | If owners can bypass certain options.                                              | `b` is a boolean. If no boolean is provided, the value is assumed to be `true`.                                                                                                      |</span>
 <span class="doccomment">/// | `#[help_available]` &lt;/br&gt; `#[help_available(b)]`     | If the group should be displayed in the help message.                              | `b` is a boolean. If no boolean is provided, the value is assumed to be `true`.                                                                                                      |</span>
 <span class="doccomment">/// | `#[checks(identifiers)]`                             | Preconditions that must met before the command&#39;s execution.                        | `identifiers` is a comma separated list of identifiers referencing functions marked by the `#[check]` macro                                                                          |</span>
-<span class="doccomment">/// | `#[required_permissions(perms)]`                     | Set of permissions the user must possess.                                          | `perms` is a comma separated list of permission names.&lt;/br&gt; These can be found at [Discord&#39;s official documentation](https://discord.com/developers/docs/topics/permissions).        |</span>
+<span class="doccomment">/// | `#[required_permissions(perms)]`                     | Set of permissions the user must possess. &lt;/br&gt; In order for this attribute to work, &quot;Presence Intent&quot; and &quot;Server Member Intent&quot; options in bot application must be enabled and all intent flags must be enabled during client creation. | `perms` is a comma separated list of permission names.&lt;/br&gt; These can be found at [Discord&#39;s official documentation](https://discord.com/developers/docs/topics/permissions).        |</span>
 <span class="doccomment">/// | `#[default_command(cmd)]`                            | A command to execute if none of the group&#39;s prefixes are given.                    | `cmd` is an identifier referencing a function marked by the `#[command]` macro                                                                                                       |</span>
 <span class="doccomment">/// | `#[description(desc)]` &lt;/br&gt; `#[description = desc]` | The group&#39;s description or summary.                                                | `desc` is a string describing the group.                                                                                                                                             |</span>
 <span class="doccomment">/// | `#[summary(desc)]` &lt;/br&gt; `#[summary = desc]`         | A summary group description displayed when shown multiple groups.                  | `desc` is a string summaryly describing the group.                                                                                                                                   |</span>
@@ -1566,16 +1554,16 @@
 <span class="doccomment">/// [`command`]: macro@command</span>
 
 <span class="attribute">#[<span class="ident">proc_macro_attribute</span>]</span>
-<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">group</span>(<span class="ident">attr</span>: <span class="ident">TokenStream</span>, <span class="ident">input</span>: <span class="ident">TokenStream</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">TokenStream</span> {
+<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">group</span>(<span class="ident">attr</span>: <span class="ident">TokenStream</span>, <span class="ident">input</span>: <span class="ident">TokenStream</span>) -&gt; <span class="ident">TokenStream</span> {
     <span class="kw">let</span> <span class="ident">group</span> <span class="op">=</span> <span class="macro">parse_macro_input!</span>(<span class="ident">input</span> <span class="kw">as</span> <span class="ident">GroupStruct</span>);
 
-    <span class="kw">let</span> <span class="ident">name</span> <span class="op">=</span> <span class="kw">if</span> <span class="op">!</span><span class="ident">attr</span>.<span class="ident">is_empty</span>() {
-        <span class="macro">parse_macro_input!</span>(<span class="ident">attr</span> <span class="kw">as</span> <span class="ident">Lit</span>).<span class="ident">to_str</span>()
+    <span class="kw">let</span> <span class="ident">name</span> <span class="op">=</span> <span class="kw">if</span> <span class="ident">attr</span>.<span class="ident">is_empty</span>() {
+        <span class="ident">group</span>.<span class="ident">name</span>.<span class="ident">to_string_non_raw</span>()
     } <span class="kw">else</span> {
-        <span class="ident">group</span>.<span class="ident">name</span>.<span class="ident">to_string</span>()
+        <span class="macro">parse_macro_input!</span>(<span class="ident">attr</span> <span class="kw">as</span> <span class="ident">Lit</span>).<span class="ident">to_str</span>()
     };
 
-    <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">options</span> <span class="op">=</span> <span class="ident">GroupOptions</span>::<span class="ident">new</span>();
+    <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">options</span> <span class="op">=</span> <span class="ident">GroupOptions::new</span>();
 
     <span class="kw">for</span> <span class="ident">attribute</span> <span class="kw">in</span> <span class="kw-2">&amp;</span><span class="ident">group</span>.<span class="ident">attributes</span> {
         <span class="kw">let</span> <span class="ident">span</span> <span class="op">=</span> <span class="ident">attribute</span>.<span class="ident">span</span>();
@@ -1585,25 +1573,25 @@
         <span class="kw">let</span> <span class="ident">name</span> <span class="op">=</span> <span class="kw-2">&amp;</span><span class="ident">name</span>[..];
 
         <span class="kw">match</span> <span class="ident">name</span> {
-            <span class="string">&quot;prefix&quot;</span> <span class="op">=</span><span class="op">&gt;</span> {
-                <span class="ident">options</span>.<span class="ident">prefixes</span> <span class="op">=</span> <span class="macro">vec!</span>[<span class="macro">propagate_err!</span>(<span class="ident">attributes</span>::<span class="ident">parse</span>(<span class="ident">values</span>))];
+            <span class="string">&quot;prefix&quot;</span> =&gt; {
+                <span class="ident">options</span>.<span class="ident">prefixes</span> <span class="op">=</span> <span class="macro">vec!</span>[<span class="macro">propagate_err!</span>(<span class="ident">attributes::parse</span>(<span class="ident">values</span>))];
             },
-            <span class="string">&quot;description&quot;</span> <span class="op">=</span><span class="op">&gt;</span> {
-                <span class="kw">let</span> <span class="ident">line</span>: <span class="ident">String</span> <span class="op">=</span> <span class="macro">propagate_err!</span>(<span class="ident">attributes</span>::<span class="ident">parse</span>(<span class="ident">values</span>));
-                <span class="ident">util</span>::<span class="ident">append_line</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">options</span>.<span class="ident">description</span>, <span class="ident">line</span>);
+            <span class="string">&quot;description&quot;</span> =&gt; {
+                <span class="kw">let</span> <span class="ident">line</span>: <span class="ident">String</span> <span class="op">=</span> <span class="macro">propagate_err!</span>(<span class="ident">attributes::parse</span>(<span class="ident">values</span>));
+                <span class="ident">util::append_line</span>(<span class="kw-2">&amp;mut</span> <span class="ident">options</span>.<span class="ident">description</span>, <span class="ident">line</span>);
             },
-            <span class="string">&quot;summary&quot;</span> <span class="op">=</span><span class="op">&gt;</span> {
-                <span class="kw">let</span> <span class="ident">arg</span>: <span class="ident">String</span> <span class="op">=</span> <span class="macro">propagate_err!</span>(<span class="ident">attributes</span>::<span class="ident">parse</span>(<span class="ident">values</span>));
+            <span class="string">&quot;summary&quot;</span> =&gt; {
+                <span class="kw">let</span> <span class="ident">arg</span>: <span class="ident">String</span> <span class="op">=</span> <span class="macro">propagate_err!</span>(<span class="ident">attributes::parse</span>(<span class="ident">values</span>));
 
-                <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">desc</span>) <span class="op">=</span> <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">options</span>.<span class="ident">summary</span>.<span class="number">0</span> {
-                    <span class="kw">use</span> <span class="ident">std</span>::<span class="ident">fmt</span>::<span class="ident">Write</span>;
+                <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">desc</span>) <span class="op">=</span> <span class="kw-2">&amp;mut</span> <span class="ident">options</span>.<span class="ident">summary</span>.<span class="number">0</span> {
+                    <span class="kw">use</span> <span class="ident">std::fmt::Write</span>;
 
                     <span class="kw">let</span> <span class="kw">_</span> <span class="op">=</span> <span class="macro">write!</span>(<span class="ident">desc</span>, <span class="string">&quot;\n{}&quot;</span>, <span class="ident">arg</span>.<span class="ident">trim_matches</span>(<span class="string">&#39; &#39;</span>));
                 } <span class="kw">else</span> {
                     <span class="ident">options</span>.<span class="ident">summary</span> <span class="op">=</span> <span class="ident">AsOption</span>(<span class="prelude-val">Some</span>(<span class="ident">arg</span>));
                 }
             },
-            <span class="kw">_</span> <span class="op">=</span><span class="op">&gt;</span> <span class="macro">match_options!</span>(<span class="ident">name</span>, <span class="ident">values</span>, <span class="ident">options</span>, <span class="ident">span</span> <span class="op">=</span><span class="op">&gt;</span> [
+            <span class="kw">_</span> =&gt; <span class="macro">match_options!</span>(<span class="ident">name</span>, <span class="ident">values</span>, <span class="ident">options</span>, <span class="ident">span</span> =&gt; [
                 <span class="ident">prefixes</span>;
                 <span class="ident">only_in</span>;
                 <span class="ident">owners_only</span>;
@@ -1650,8 +1638,8 @@
     <span class="kw">let</span> <span class="ident">sub_groups</span> <span class="op">=</span> <span class="ident">sub_groups</span>.<span class="ident">into_iter</span>().<span class="ident">map</span>(<span class="op">|</span><span class="ident">c</span><span class="op">|</span> <span class="ident">c</span>.<span class="ident">with_suffix</span>(<span class="ident">GROUP</span>)).<span class="ident">collect</span>::<span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="kw">_</span><span class="op">&gt;</span><span class="op">&gt;</span>();
 
     <span class="kw">let</span> <span class="ident">options</span> <span class="op">=</span> <span class="ident">group</span>.<span class="ident">name</span>.<span class="ident">with_suffix</span>(<span class="ident">GROUP_OPTIONS</span>);
-    <span class="kw">let</span> <span class="ident">options_path</span> <span class="op">=</span> <span class="macro">quote!</span>(<span class="ident">serenity</span>::<span class="ident">framework</span>::<span class="ident">standard</span>::<span class="ident">GroupOptions</span>);
-    <span class="kw">let</span> <span class="ident">group_path</span> <span class="op">=</span> <span class="macro">quote!</span>(<span class="ident">serenity</span>::<span class="ident">framework</span>::<span class="ident">standard</span>::<span class="ident">CommandGroup</span>);
+    <span class="kw">let</span> <span class="ident">options_path</span> <span class="op">=</span> <span class="macro">quote!</span>(<span class="ident">serenity::framework::standard::GroupOptions</span>);
+    <span class="kw">let</span> <span class="ident">group_path</span> <span class="op">=</span> <span class="macro">quote!</span>(<span class="ident">serenity::framework::standard::CommandGroup</span>);
 
     (<span class="macro">quote!</span> {
         #(#<span class="ident">cooked</span>)<span class="op">*</span>
@@ -1694,7 +1682,7 @@
 <span class="doccomment">/// | `#[display_in_help]` &lt;/br&gt; `#[display_in_help(b)]` | If the check should be listed in help. Has no effect on `check_in_help`. | `b` is a boolean. If no boolean is provided, the value is assumed to be `true`.      |</span>
 <span class="doccomment">/// | `#[check_in_help]` &lt;/br&gt; `#[check_in_help(b)]`     | If the check should be evaluated in help.                                | `b` is a boolean. If no boolean is provided, the value is assumed to be `true`.      |</span>
 <span class="attribute">#[<span class="ident">proc_macro_attribute</span>]</span>
-<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">check</span>(<span class="ident">_attr</span>: <span class="ident">TokenStream</span>, <span class="ident">input</span>: <span class="ident">TokenStream</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">TokenStream</span> {
+<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">check</span>(<span class="ident">_attr</span>: <span class="ident">TokenStream</span>, <span class="ident">input</span>: <span class="ident">TokenStream</span>) -&gt; <span class="ident">TokenStream</span> {
     <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">fun</span> <span class="op">=</span> <span class="macro">parse_macro_input!</span>(<span class="ident">input</span> <span class="kw">as</span> <span class="ident">CommandFun</span>);
 
     <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">name</span> <span class="op">=</span> <span class="string">&quot;&lt;fn&gt;&quot;</span>.<span class="ident">to_string</span>();
@@ -1709,33 +1697,33 @@
         <span class="kw">let</span> <span class="ident">n</span> <span class="op">=</span> <span class="kw-2">&amp;</span><span class="ident">n</span>[..];
 
         <span class="kw">match</span> <span class="ident">n</span> {
-            <span class="string">&quot;name&quot;</span> <span class="op">=</span><span class="op">&gt;</span> <span class="ident">name</span> <span class="op">=</span> <span class="macro">propagate_err!</span>(<span class="ident">attributes</span>::<span class="ident">parse</span>(<span class="ident">values</span>)),
-            <span class="string">&quot;display_in_help&quot;</span> <span class="op">=</span><span class="op">&gt;</span> <span class="ident">display_in_help</span> <span class="op">=</span> <span class="macro">propagate_err!</span>(<span class="ident">attributes</span>::<span class="ident">parse</span>(<span class="ident">values</span>)),
-            <span class="string">&quot;check_in_help&quot;</span> <span class="op">=</span><span class="op">&gt;</span> <span class="ident">check_in_help</span> <span class="op">=</span> <span class="macro">propagate_err!</span>(<span class="ident">attributes</span>::<span class="ident">parse</span>(<span class="ident">values</span>)),
-            <span class="kw">_</span> <span class="op">=</span><span class="op">&gt;</span> {
-                <span class="kw">return</span> <span class="ident">Error</span>::<span class="ident">new</span>(<span class="ident">span</span>, <span class="macro">format_args!</span>(<span class="string">&quot;invalid attribute: {:?}&quot;</span>, <span class="ident">n</span>))
+            <span class="string">&quot;name&quot;</span> =&gt; <span class="ident">name</span> <span class="op">=</span> <span class="macro">propagate_err!</span>(<span class="ident">attributes::parse</span>(<span class="ident">values</span>)),
+            <span class="string">&quot;display_in_help&quot;</span> =&gt; <span class="ident">display_in_help</span> <span class="op">=</span> <span class="macro">propagate_err!</span>(<span class="ident">attributes::parse</span>(<span class="ident">values</span>)),
+            <span class="string">&quot;check_in_help&quot;</span> =&gt; <span class="ident">check_in_help</span> <span class="op">=</span> <span class="macro">propagate_err!</span>(<span class="ident">attributes::parse</span>(<span class="ident">values</span>)),
+            <span class="kw">_</span> =&gt; {
+                <span class="kw">return</span> <span class="ident">Error::new</span>(<span class="ident">span</span>, <span class="macro">format_args!</span>(<span class="string">&quot;invalid attribute: {:?}&quot;</span>, <span class="ident">n</span>))
                     .<span class="ident">to_compile_error</span>()
                     .<span class="ident">into</span>();
             },
         }
     }
 
-    <span class="macro">propagate_err!</span>(<span class="ident">create_declaration_validations</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">fun</span>, <span class="ident">DeclarFor</span>::<span class="ident">Check</span>));
+    <span class="macro">propagate_err!</span>(<span class="ident">create_declaration_validations</span>(<span class="kw-2">&amp;mut</span> <span class="ident">fun</span>, <span class="ident">DeclarFor::Check</span>));
 
-    <span class="kw">let</span> <span class="ident">res</span> <span class="op">=</span> <span class="macro">parse_quote!</span>(<span class="ident">std</span>::<span class="ident">result</span>::<span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">serenity</span>::<span class="ident">framework</span>::<span class="ident">standard</span>::<span class="ident">Reason</span><span class="op">&gt;</span>);
-    <span class="ident">create_return_type_validation</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">fun</span>, <span class="ident">res</span>);
+    <span class="kw">let</span> <span class="ident">res</span> <span class="op">=</span> <span class="macro">parse_quote!</span>(<span class="ident">std::result::Result</span><span class="op">&lt;</span>(), <span class="ident">serenity::framework::standard::Reason</span><span class="op">&gt;</span>);
+    <span class="ident">create_return_type_validation</span>(<span class="kw-2">&amp;mut</span> <span class="ident">fun</span>, <span class="kw-2">&amp;</span><span class="ident">res</span>);
 
     <span class="kw">let</span> <span class="ident">n</span> <span class="op">=</span> <span class="ident">fun</span>.<span class="ident">name</span>.<span class="ident">clone</span>();
     <span class="kw">let</span> <span class="ident">n2</span> <span class="op">=</span> <span class="ident">name</span>.<span class="ident">clone</span>();
     <span class="kw">let</span> <span class="ident">visibility</span> <span class="op">=</span> <span class="ident">fun</span>.<span class="ident">visibility</span>;
-    <span class="kw">let</span> <span class="ident">name</span> <span class="op">=</span> <span class="kw">if</span> <span class="ident">name</span> <span class="op">=</span><span class="op">=</span> <span class="string">&quot;&lt;fn&gt;&quot;</span> { <span class="ident">fun</span>.<span class="ident">name</span>.<span class="ident">clone</span>() } <span class="kw">else</span> { <span class="ident">Ident</span>::<span class="ident">new</span>(<span class="kw-2">&amp;</span><span class="ident">name</span>, <span class="ident">Span</span>::<span class="ident">call_site</span>()) };
+    <span class="kw">let</span> <span class="ident">name</span> <span class="op">=</span> <span class="kw">if</span> <span class="ident">name</span> <span class="op">==</span> <span class="string">&quot;&lt;fn&gt;&quot;</span> { <span class="ident">fun</span>.<span class="ident">name</span>.<span class="ident">clone</span>() } <span class="kw">else</span> { <span class="ident">Ident::new</span>(<span class="kw-2">&amp;</span><span class="ident">name</span>, <span class="ident">Span::call_site</span>()) };
     <span class="kw">let</span> <span class="ident">name</span> <span class="op">=</span> <span class="ident">name</span>.<span class="ident">with_suffix</span>(<span class="ident">CHECK</span>);
 
-    <span class="kw">let</span> <span class="ident">check</span> <span class="op">=</span> <span class="macro">quote!</span>(<span class="ident">serenity</span>::<span class="ident">framework</span>::<span class="ident">standard</span>::<span class="ident">Check</span>);
+    <span class="kw">let</span> <span class="ident">check</span> <span class="op">=</span> <span class="macro">quote!</span>(<span class="ident">serenity::framework::standard::Check</span>);
     <span class="kw">let</span> <span class="ident">cooked</span> <span class="op">=</span> <span class="ident">fun</span>.<span class="ident">cooked</span>;
     <span class="kw">let</span> <span class="ident">body</span> <span class="op">=</span> <span class="ident">fun</span>.<span class="ident">body</span>;
     <span class="kw">let</span> <span class="ident">ret</span> <span class="op">=</span> <span class="ident">fun</span>.<span class="ident">ret</span>;
-    <span class="ident">populate_fut_lifetimes_on_refs</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">fun</span>.<span class="ident">args</span>);
+    <span class="ident">populate_fut_lifetimes_on_refs</span>(<span class="kw-2">&amp;mut</span> <span class="ident">fun</span>.<span class="ident">args</span>);
     <span class="kw">let</span> <span class="ident">args</span> <span class="op">=</span> <span class="ident">fun</span>.<span class="ident">args</span>;
 
     (<span class="macro">quote!</span> {
@@ -1749,10 +1737,12 @@
 
         #(#<span class="ident">cooked</span>)<span class="op">*</span>
         <span class="attribute">#[<span class="ident">allow</span>(<span class="ident">missing_docs</span>)]</span>
-        #<span class="ident">visibility</span> <span class="kw">fn</span> #<span class="ident">n</span><span class="op">&lt;</span><span class="lifetime">&#39;fut</span><span class="op">&gt;</span>(#(#<span class="ident">args</span>),<span class="kw-2">*</span>) <span class="op">-</span><span class="op">&gt;</span> ::<span class="ident">serenity</span>::<span class="ident">futures</span>::<span class="ident">future</span>::<span class="ident">BoxFuture</span><span class="op">&lt;</span><span class="lifetime">&#39;fut</span>, #<span class="ident">ret</span><span class="op">&gt;</span> {
-            <span class="kw">use</span> ::<span class="ident">serenity</span>::<span class="ident">futures</span>::<span class="ident">future</span>::<span class="ident">FutureExt</span>;
-
-            <span class="kw">async</span> <span class="kw">move</span> { #(#<span class="ident">body</span>)<span class="op">*</span> }.<span class="ident">boxed</span>()
+        #<span class="ident">visibility</span> <span class="kw">fn</span> #<span class="ident">n</span><span class="op">&lt;</span><span class="lifetime">&#39;fut</span><span class="op">&gt;</span>(#(#<span class="ident">args</span>),<span class="kw-2">*</span>) -&gt; <span class="ident">std::pin::Pin</span><span class="op">&lt;</span><span class="ident">Box</span><span class="op">&lt;</span><span class="kw">dyn</span> <span class="ident">std::future::Future</span><span class="op">&lt;</span><span class="ident">Output</span> <span class="op">=</span> #<span class="ident">ret</span><span class="op">&gt;</span> <span class="op">+</span> <span class="ident">Send</span> <span class="op">+</span> <span class="lifetime">&#39;fut</span><span class="op">&gt;</span><span class="op">&gt;</span> {
+            <span class="ident">Box::pin</span>(<span class="kw">async</span> <span class="kw">move</span> {
+                <span class="kw">let</span> <span class="ident">_output</span>: #<span class="ident">ret</span> <span class="op">=</span> { #(#<span class="ident">body</span>)<span class="op">*</span> };
+                <span class="attribute">#[<span class="ident">allow</span>(<span class="ident">unreachable_code</span>)]</span>
+                <span class="ident">_output</span>
+            })
         }
     })
     .<span class="ident">into</span>()
@@ -1778,9 +1768,7 @@
 <span class="doccomment">/// use std::pin::Pin;</span>
 <span class="doccomment">///</span>
 <span class="doccomment">/// fn foo(n: i32) -&gt; Pin&lt;Box&lt;dyn std::future::Future&lt;Output = i32&gt;&gt;&gt; {</span>
-<span class="doccomment">///     Box::pin(async move {</span>
-<span class="doccomment">///         n + 4</span>
-<span class="doccomment">///     })</span>
+<span class="doccomment">///     Box::pin(async move { n + 4 })</span>
 <span class="doccomment">/// }</span>
 <span class="doccomment">/// ```</span>
 <span class="doccomment">///</span>
@@ -1790,27 +1778,21 @@
 <span class="doccomment">/// ```rust,no_run</span>
 <span class="doccomment">/// # #![feature(async_closure)]</span>
 <span class="doccomment">/// #</span>
-<span class="doccomment">/// async move |x: i32| {</span>
-<span class="doccomment">///     x * 2 + 4</span>
-<span class="doccomment">/// }</span>
+<span class="doccomment">/// async move |x: i32| x * 2 + 4</span>
 <span class="doccomment">/// # ;</span>
 <span class="doccomment">/// ```</span>
 <span class="doccomment">///</span>
 <span class="doccomment">/// is changed to:</span>
 <span class="doccomment">///</span>
 <span class="doccomment">/// ```rust,no_run</span>
-<span class="doccomment">/// |x: i32| {</span>
-<span class="doccomment">///     Box::pin(async move {</span>
-<span class="doccomment">///         x * 2 + 4</span>
-<span class="doccomment">///     })</span>
-<span class="doccomment">/// }</span>
+<span class="doccomment">/// |x: i32| Box::pin(async move { x * 2 + 4 })</span>
 <span class="doccomment">/// # ;</span>
 <span class="doccomment">/// ```</span>
 <span class="doccomment">///</span>
 <span class="doccomment">/// ## How references are handled</span>
 <span class="doccomment">///</span>
 <span class="doccomment">/// When a function contains references, their lifetimes are constrained to the returned</span>
-<span class="doccomment">/// `Future`. If the above `foo` function had `&amp;i32` as a parameter, the transformation would be</span>
+<span class="doccomment">/// [`Future`]. If the above `foo` function had `&amp;i32` as a parameter, the transformation would be</span>
 <span class="doccomment">/// instead this:</span>
 <span class="doccomment">///</span>
 <span class="doccomment">/// ```rust,no_run</span>
@@ -1818,9 +1800,7 @@
 <span class="doccomment">/// use std::pin::Pin;</span>
 <span class="doccomment">///</span>
 <span class="doccomment">/// fn foo&lt;&#39;fut&gt;(n: &amp;&#39;fut i32) -&gt; Pin&lt;Box&lt;dyn std::future::Future&lt;Output = i32&gt; + &#39;fut&gt;&gt; {</span>
-<span class="doccomment">///     Box::pin(async move {</span>
-<span class="doccomment">///         *n + 4</span>
-<span class="doccomment">///     })</span>
+<span class="doccomment">///     Box::pin(async move { *n + 4 })</span>
 <span class="doccomment">/// }</span>
 <span class="doccomment">/// ```</span>
 <span class="doccomment">///</span>
@@ -1831,9 +1811,9 @@
 <span class="doccomment">///</span>
 <span class="doccomment">/// The macro performs the transformation to permit the framework to store and invoke the functions.</span>
 <span class="doccomment">///</span>
-<span class="doccomment">/// Functions marked with the `async` keyword will wrap their return type with the `Future` trait,</span>
+<span class="doccomment">/// Functions marked with the `async` keyword will wrap their return type with the [`Future`] trait,</span>
 <span class="doccomment">/// which a state-machine generated by the compiler for the function will implement. This complicates</span>
-<span class="doccomment">/// matters for the framework, as `Future` is a trait. Depending on a type that implements a trait</span>
+<span class="doccomment">/// matters for the framework, as [`Future`] is a trait. Depending on a type that implements a trait</span>
 <span class="doccomment">/// is done with two methods in Rust:</span>
 <span class="doccomment">///</span>
 <span class="doccomment">/// 1. static dispatch - generics</span>
@@ -1843,13 +1823,13 @@
 <span class="doccomment">/// of different commands that will be stored in a single list. And due to the nature of generics,</span>
 <span class="doccomment">/// generic types can only resolve to a single concrete type. If commands had a generic type for</span>
 <span class="doccomment">/// their function&#39;s return type, the framework would be unable to store commands, as only a single</span>
-<span class="doccomment">/// `Future` type from one of the commands would get resolved, preventing other commands from being</span>
+<span class="doccomment">/// [`Future`] type from one of the commands would get resolved, preventing other commands from being</span>
 <span class="doccomment">/// stored.</span>
 <span class="doccomment">///</span>
 <span class="doccomment">/// Second method involves heap allocations, but is the only working solution. If a trait is</span>
-<span class="doccomment">/// object-safe (which `Future` is), the compiler can generate a table of function pointers</span>
+<span class="doccomment">/// object-safe (which [`Future`] is), the compiler can generate a table of function pointers</span>
 <span class="doccomment">/// (a vtable) that correspond to certain implementations of the trait. This allows to decide</span>
-<span class="doccomment">/// which implementation to use at runtime. Thus, we can use the interface for the `Future` trait,</span>
+<span class="doccomment">/// which implementation to use at runtime. Thus, we can use the interface for the [`Future`] trait,</span>
 <span class="doccomment">/// and avoid depending on the underlying value (such as its size). To opt-in to dynamic dispatch,</span>
 <span class="doccomment">/// trait objects must be used with a pointer, like references (`&amp;` and `&amp;mut`) or `Box`. The</span>
 <span class="doccomment">/// latter is what&#39;s used by the macro, as the ownership of the value (the state-machine) must be</span>
@@ -1867,49 +1847,49 @@
 <span class="doccomment">///</span>
 <span class="doccomment">/// [`Future`]: std::future::Future</span>
 <span class="attribute">#[<span class="ident">proc_macro_attribute</span>]</span>
-<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">hook</span>(<span class="ident">_attr</span>: <span class="ident">TokenStream</span>, <span class="ident">input</span>: <span class="ident">TokenStream</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">TokenStream</span> {
+<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">hook</span>(<span class="ident">_attr</span>: <span class="ident">TokenStream</span>, <span class="ident">input</span>: <span class="ident">TokenStream</span>) -&gt; <span class="ident">TokenStream</span> {
     <span class="kw">let</span> <span class="ident">hook</span> <span class="op">=</span> <span class="macro">parse_macro_input!</span>(<span class="ident">input</span> <span class="kw">as</span> <span class="ident">Hook</span>);
 
     <span class="kw">match</span> <span class="ident">hook</span> {
-        <span class="ident">Hook</span>::<span class="ident">Function</span>(<span class="kw-2">mut</span> <span class="ident">fun</span>) <span class="op">=</span><span class="op">&gt;</span> {
-            <span class="kw">let</span> <span class="ident">cooked</span> <span class="op">=</span> <span class="ident">fun</span>.<span class="ident">cooked</span>;
+        <span class="ident">Hook::Function</span>(<span class="kw-2">mut</span> <span class="ident">fun</span>) =&gt; {
+            <span class="kw">let</span> <span class="ident">attributes</span> <span class="op">=</span> <span class="ident">fun</span>.<span class="ident">attributes</span>;
             <span class="kw">let</span> <span class="ident">visibility</span> <span class="op">=</span> <span class="ident">fun</span>.<span class="ident">visibility</span>;
             <span class="kw">let</span> <span class="ident">fun_name</span> <span class="op">=</span> <span class="ident">fun</span>.<span class="ident">name</span>;
             <span class="kw">let</span> <span class="ident">body</span> <span class="op">=</span> <span class="ident">fun</span>.<span class="ident">body</span>;
             <span class="kw">let</span> <span class="ident">ret</span> <span class="op">=</span> <span class="ident">fun</span>.<span class="ident">ret</span>;
 
-            <span class="ident">populate_fut_lifetimes_on_refs</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">fun</span>.<span class="ident">args</span>);
+            <span class="ident">populate_fut_lifetimes_on_refs</span>(<span class="kw-2">&amp;mut</span> <span class="ident">fun</span>.<span class="ident">args</span>);
             <span class="kw">let</span> <span class="ident">args</span> <span class="op">=</span> <span class="ident">fun</span>.<span class="ident">args</span>;
 
             (<span class="macro">quote!</span> {
-                #(#<span class="ident">cooked</span>)<span class="op">*</span>
+                #(#<span class="ident">attributes</span>)<span class="op">*</span>
                 <span class="attribute">#[<span class="ident">allow</span>(<span class="ident">missing_docs</span>)]</span>
-                #<span class="ident">visibility</span> <span class="kw">fn</span> #<span class="ident">fun_name</span><span class="op">&lt;</span><span class="lifetime">&#39;fut</span><span class="op">&gt;</span>(#(#<span class="ident">args</span>),<span class="kw-2">*</span>) <span class="op">-</span><span class="op">&gt;</span> ::<span class="ident">serenity</span>::<span class="ident">futures</span>::<span class="ident">future</span>::<span class="ident">BoxFuture</span><span class="op">&lt;</span><span class="lifetime">&#39;fut</span>, #<span class="ident">ret</span><span class="op">&gt;</span> {
-                    <span class="kw">use</span> ::<span class="ident">serenity</span>::<span class="ident">futures</span>::<span class="ident">future</span>::<span class="ident">FutureExt</span>;
-
-                    <span class="kw">async</span> <span class="kw">move</span> { #(#<span class="ident">body</span>)<span class="op">*</span> }.<span class="ident">boxed</span>()
+                #<span class="ident">visibility</span> <span class="kw">fn</span> #<span class="ident">fun_name</span><span class="op">&lt;</span><span class="lifetime">&#39;fut</span><span class="op">&gt;</span>(#(#<span class="ident">args</span>),<span class="kw-2">*</span>) -&gt; <span class="ident">std::pin::Pin</span><span class="op">&lt;</span><span class="ident">Box</span><span class="op">&lt;</span><span class="kw">dyn</span> <span class="ident">std::future::Future</span><span class="op">&lt;</span><span class="ident">Output</span> <span class="op">=</span> #<span class="ident">ret</span><span class="op">&gt;</span> <span class="op">+</span> <span class="ident">Send</span> <span class="op">+</span> <span class="lifetime">&#39;fut</span><span class="op">&gt;</span><span class="op">&gt;</span> {
+                    <span class="ident">Box::pin</span>(<span class="kw">async</span> <span class="kw">move</span> {
+                        <span class="kw">let</span> <span class="ident">_output</span>: #<span class="ident">ret</span> <span class="op">=</span> { #(#<span class="ident">body</span>)<span class="op">*</span> };
+                        <span class="attribute">#[<span class="ident">allow</span>(<span class="ident">unreachable_code</span>)]</span>
+                        <span class="ident">_output</span>
+                    })
                 }
             })
                 .<span class="ident">into</span>()
         },
-        <span class="ident">Hook</span>::<span class="ident">Closure</span>(<span class="ident">closure</span>) <span class="op">=</span><span class="op">&gt;</span> {
-            <span class="kw">let</span> <span class="ident">cooked</span> <span class="op">=</span> <span class="ident">closure</span>.<span class="ident">cooked</span>;
+        <span class="ident">Hook::Closure</span>(<span class="ident">closure</span>) =&gt; {
+            <span class="kw">let</span> <span class="ident">attributes</span> <span class="op">=</span> <span class="ident">closure</span>.<span class="ident">attributes</span>;
             <span class="kw">let</span> <span class="ident">args</span> <span class="op">=</span> <span class="ident">closure</span>.<span class="ident">args</span>;
             <span class="kw">let</span> <span class="ident">ret</span> <span class="op">=</span> <span class="ident">closure</span>.<span class="ident">ret</span>;
             <span class="kw">let</span> <span class="ident">body</span> <span class="op">=</span> <span class="ident">closure</span>.<span class="ident">body</span>;
 
             (<span class="macro">quote!</span> {
-                #(#<span class="ident">cooked</span>)<span class="op">*</span>
+                #(#<span class="ident">attributes</span>)<span class="op">*</span>
                 <span class="op">|</span>#<span class="ident">args</span><span class="op">|</span> #<span class="ident">ret</span> {
-                    <span class="kw">use</span> ::<span class="ident">serenity</span>::<span class="ident">futures</span>::<span class="ident">future</span>::<span class="ident">FutureExt</span>;
-
-                    <span class="kw">async</span> <span class="kw">move</span> { #<span class="ident">body</span> }.<span class="ident">boxed</span>()
+                    <span class="ident">Box::pin</span>(<span class="kw">async</span> <span class="kw">move</span> { #<span class="ident">body</span> })
                 }
             })
             .<span class="ident">into</span>()
         },
     }
 }
-</pre></div>
-</section><section id="search" class="content hidden"></section><section class="footer"></section><div id="rustdoc-vars" data-root-path="../../" data-current-crate="command_attr" data-search-js="../../search-index.js"></div>
-    <script src="../../main.js"></script><script src="../../source-script.js"></script><script src="../../source-files.js"></script></body></html>
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="command_attr" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.63.0-nightly (10f4ce324 2022-06-22)" ></div>
+</body></html>
